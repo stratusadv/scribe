@@ -24,12 +24,12 @@ export default defineConfig(() => ({
     },
     build: {
         target: "esnext",
-        minify: "esbuild",
         cssMinify: true,
         sourcemap: false,
         chunkSizeWarningLimit: 1024,
-        rollupOptions: {
+        rolldownOptions: {
             output: {
+                legalComments: "none",
                 manualChunks(id: string) {
                     if (!id.includes("node_modules")) return
                     if (id.includes("@tiptap") || id.includes("tiptap-")
@@ -46,8 +46,5 @@ export default defineConfig(() => ({
                 },
             },
         },
-    },
-    esbuild: {
-        legalComments: "none",
     },
 }))
