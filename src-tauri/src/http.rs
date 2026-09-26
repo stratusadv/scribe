@@ -1,0 +1,298 @@
+use crate::error::{AppError, AppResult};
+use futures_util::StreamExt;
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
+use std::future::Future;
+use std::sync::LazyLock;
+use std::time::Duration;
+
+pub(crate) const RETRY_ATTEMPTS_MAX: u32 = 3;
+pub(crate) const RETRY_BACKOFF_MS_BASE: u64 = 500;
+pub(crate) const RESPONSE_BYTES_MAX: u32 = 8 << 20;
+const RESPONSE_CHUNK_COUNT_MAX: u32 = 1 << 20;
+const STATUS_CODE_FIRST: u16 = 100;
+const STATUS_CODE_LAST: u16 = 599;
+const STATUS_CODE_SERVER_FIRST: u16 = 500;
+const STATUS_CODE_TOO_MANY_REQUESTS: u16 = 429;
+
+const _: () = assert!(RETRY_ATTEMPTS_MAX >= 1);
+const _: () = assert!(RETRY_BACKOFF_MS_BASE > 0);
+const _: () = assert!(RESPONSE_BYTES_MAX > 0);
+const _: () = assert!(STATUS_CODE_FIRST < STATUS_CODE_SERVER_FIRST);
+const _: () = assert!(STATUS_CODE_SERVER_FIRST <= STATUS_CODE_LAST);
+
+pub(crate) type ClientCell = LazyLock<Result<reqwest::Client, String>>;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ClientTimeouts {
+    pub(crate) connect: Duration,
+    pub(crate) read: Option<Duration>,
+    pub(crate) request: Duration,
+}
+
+fn crypto_provider_install() {
+    if rustls::crypto::CryptoProvider::get_default().is_some() { return; }
+
+    let installed = rustls::crypto::ring::default_provider().install_default();
+
+    if let Err(existing) = installed {
+        tracing::debug!(
+            target: "scribe_lib::http",
+            "a crypto provider was already installed: {existing:?}"
+        );
+    }
+
+    debug_assert!(rustls::crypto::CryptoProvider::get_default().is_some());
+}
+
+pub(crate) fn client_build(timeouts: &ClientTimeouts) -> Result<reqwest::Client, String> {
+    debug_assert!(!timeouts.connect.is_zero());
+    debug_assert!(!timeouts.request.is_zero());
+
+    crypto_provider_install();
+
+    let mut builder = reqwest::Client::builder()
+        .timeout(timeouts.request)
+        .connect_timeout(timeouts.connect);
+
+    if let Some(read) = timeouts.read {
+        debug_assert!(read < timeouts.request);
+
+        builder = builder.read_timeout(read);
+    }
+
+    builder.build().map_err(|error| format!("the http client could not be built: {error}"))
+}
+
+pub(crate) fn client_get(cell: &'static ClientCell) -> AppResult<&'static reqwest::Client> {
+    cell.as_ref().map_err(|message| AppError::Config(message.clone()))
+}
+
+pub(crate) async fn retry_run<T, Attempt, Work>(attempt_run: Attempt) -> AppResult<T>
+where
+    Attempt: Fn() -> Work,
+    Work: Future<Output = AppResult<T>>,
+{
+    for attempt in 0..RETRY_ATTEMPTS_MAX - 1 {
+        debug_assert!(attempt < RETRY_ATTEMPTS_MAX);
+
+        let error = match attempt_run().await {
+            Ok(value) => return Ok(value),
+            Err(error) => error,
+        };
+
+        let transient = retry_is_transient(&error);
+
+        if transient {
+            retry_run_backoff(attempt, &error).await;
+
+            continue;
+        }
+
+        return Err(error);
+    }
+
+    attempt_run().await
+}
+
+async fn retry_run_backoff(attempt: u32, error: &AppError) {
+    debug_assert!(attempt + 1 < RETRY_ATTEMPTS_MAX);
+
+    let delay_ms = RETRY_BACKOFF_MS_BASE << attempt;
+
+    debug_assert!(delay_ms >= RETRY_BACKOFF_MS_BASE);
+
+    tracing::warn!(
+        target: "scribe_lib::http",
+        "retry attempt {} after {}ms: {}",
+        attempt + 1,
+        delay_ms,
+        error
+    );
+
+    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+}
+
+pub(crate) fn api_status_code(message: &str) -> Option<u16> {
+    let head = message.split(':').next()?.trim();
+    let code = head.split_whitespace().next()?.parse::<u16>().ok()?;
+
+    if !(STATUS_CODE_FIRST..=STATUS_CODE_LAST).contains(&code) {
+        return None;
+    }
+
+    debug_assert!(code >= STATUS_CODE_FIRST);
+    debug_assert!(code <= STATUS_CODE_LAST);
+
+    Some(code)
+}
+
+pub(crate) fn retry_is_transient(error: &AppError) -> bool {
+    match error {
+        AppError::Network(network) => {
+            if network.is_timeout() {
+                return true;
+            }
+
+            if network.is_connect() {
+                return true;
+            }
+
+            if network.is_request() {
+                return true;
+            }
+
+            network
+                .status()
+                .is_some_and(|status| status_is_transient(status.as_u16()))
+        }
+        AppError::API(message) => api_status_code(message).is_some_and(status_is_transient),
+        _ => false,
+    }
+}
+
+const fn status_is_transient(code: u16) -> bool {
+    if code == STATUS_CODE_TOO_MANY_REQUESTS {
+        return true;
+    }
+
+    code >= STATUS_CODE_SERVER_FIRST && code <= STATUS_CODE_LAST
+}
+
+pub(crate) async fn response_ensure_ok(
+    response: reqwest::Response,
+    label: &str,
+) -> AppResult<reqwest::Response> {
+    debug_assert!(!label.is_empty());
+
+    if response.status().is_success() {
+        return Ok(response);
+    }
+
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let message_friendly = body_error_friendly(&body).unwrap_or(body);
+    let message = format!("{} {label}: {message_friendly}", status.as_u16());
+
+    debug_assert_eq!(api_status_code(&message), Some(status.as_u16()));
+
+    Err(AppError::API(message))
+}
+
+pub(crate) async fn response_json_bounded<T: DeserializeOwned>(
+    response: reqwest::Response,
+    size_bytes_max: u32,
+) -> AppResult<T> {
+    debug_assert!(size_bytes_max > 0);
+
+    if let Some(length) = response.content_length() {
+        if length > u64::from(size_bytes_max) {
+            return Err(AppError::API(format!(
+                "the response is {length} bytes, over the {size_bytes_max} bytes this app reads"
+            )));
+        }
+    }
+
+    let mut body: Vec<u8> = Vec::new();
+    let mut stream = response.bytes_stream();
+
+    for _chunk_index in 0..RESPONSE_CHUNK_COUNT_MAX {
+        let Some(chunk) = stream.next().await else {
+            debug_assert!(body.len() <= size_bytes_max as usize);
+
+            return Ok(serde_json::from_slice(&body)?);
+        };
+
+        let chunk = chunk?;
+
+        if body.len() + chunk.len() > size_bytes_max as usize {
+            return Err(AppError::API(format!(
+                "the response ran past the {size_bytes_max} bytes this app reads"
+            )));
+        }
+
+        body.extend_from_slice(&chunk);
+    }
+
+    Err(AppError::API(format!(
+        "the response arrived in more than {RESPONSE_CHUNK_COUNT_MAX} pieces without ending"
+    )))
+}
+
+fn body_error_friendly(body: &str) -> Option<String> {
+    #[derive(Deserialize)]
+    struct OpenAIErrorEnvelope {
+        error: OpenAIError,
+    }
+
+    #[derive(Deserialize)]
+    struct OpenAIError {
+        #[serde(default)]
+        message: Option<String>,
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default, rename = "type")]
+        kind: Option<String>,
+    }
+
+    let parsed: OpenAIErrorEnvelope = serde_json::from_str(body).ok()?;
+    let message = parsed.error.message.unwrap_or_default();
+
+    if message.is_empty() {
+        return None;
+    }
+
+    if let Some(code) = parsed.error.code.filter(|code| !code.is_empty()) {
+        return Some(format!("{message} ({code})"));
+    }
+
+    if let Some(kind) = parsed.error.kind.filter(|kind| !kind.is_empty()) {
+        return Some(format!("{message} ({kind})"));
+    }
+
+    Some(message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_server_side_and_throttled_statuses_are_transient() {
+        assert!(status_is_transient(429));
+        assert!(status_is_transient(503));
+        assert!(!status_is_transient(400));
+        assert!(!status_is_transient(404));
+
+        assert!(retry_is_transient(&AppError::API("429: slow down".into())));
+        assert!(!retry_is_transient(&AppError::API("400: bad request".into())));
+        assert!(!retry_is_transient(&AppError::Config("nope".into())));
+    }
+
+    #[test]
+    fn a_status_code_is_read_only_from_a_real_status_range() {
+        assert_eq!(api_status_code("500 remote transcribe: boom"), Some(500));
+        assert_eq!(api_status_code("12345 not a status"), None);
+        assert_eq!(api_status_code("no digits here"), None);
+    }
+
+    #[test]
+    fn an_error_body_is_reported_with_its_code_when_it_carries_one() {
+        let body = r#"{"error":{"message":"no key","code":"invalid_api_key"}}"#;
+
+        assert_eq!(body_error_friendly(body), Some("no key (invalid_api_key)".to_owned()));
+        assert_eq!(body_error_friendly(r#"{"error":{"message":""}}"#), None);
+        assert_eq!(body_error_friendly("not json at all"), None);
+    }
+
+    #[test]
+    fn a_client_is_built_with_the_timeouts_it_was_given() {
+        let timeouts = ClientTimeouts {
+            connect: Duration::from_secs(1),
+            read: Some(Duration::from_secs(2)),
+            request: Duration::from_secs(3),
+        };
+
+        assert!(client_build(&timeouts).is_ok());
+    }
+}

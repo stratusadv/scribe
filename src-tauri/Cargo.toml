@@ -1,0 +1,126 @@
+[package]
+name = "scribe"
+version = "0.1.0"
+description = "scribe"
+authors = ["Brayden Carlson"]
+edition = "2024"
+
+[lib]
+name = "scribe_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+futures-util = "0.3"
+hound = "3"
+tauri = { version = "2", features = ["protocol-asset"] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls"] }
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider", "stream", "multipart"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+thiserror = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+dirs = "7"
+symphonia = { version = "0.6", features = ["aac", "isomp4", "mp3", "flac", "wav", "ogg", "vorbis", "pcm", "mkv"] }
+rubato = "5"
+sha2 = "0.11"
+docmux = { git = "https://github.com/braycarlson/docmux" }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+webkit2gtk = "2.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security_Cryptography",
+] }
+
+[profile.dev.package."*"]
+opt-level = 3
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"
+
+[profile.release]
+codegen-units = 1
+debug-assertions = true
+lto = "fat"
+overflow-checks = true
+panic = "abort"
+strip = "symbols"
+opt-level = 3
+
+[lints.rust]
+future_incompatible = { level = "warn", priority = -1 }
+let_underscore = { level = "warn", priority = -1 }
+missing_copy_implementations = "warn"
+missing_debug_implementations = "warn"
+nonstandard_style = { level = "warn", priority = -1 }
+rust_2018_idioms = { level = "warn", priority = -1 }
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unreachable_pub = "warn"
+unused = { level = "warn", priority = -1 }
+unused_import_braces = "warn"
+unused_lifetimes = "warn"
+unused_qualifications = "warn"
+variant_size_differences = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+
+cargo_common_metadata = "allow"
+multiple_crate_versions = "allow"
+redundant_pub_crate = "allow"
+upper_case_acronyms = "allow"
+collapsible_if = "allow"
+
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+clone_on_ref_ptr = "warn"
+dbg_macro = "warn"
+empty_drop = "warn"
+empty_structs_with_brackets = "warn"
+exit = "warn"
+filetype_is_file = "warn"
+float_cmp_const = "warn"
+get_unwrap = "warn"
+indexing_slicing = "warn"
+lossy_float_literal = "warn"
+mem_forget = "warn"
+multiple_inherent_impl = "warn"
+panic = "warn"
+panic_in_result_fn = "warn"
+print_stderr = "warn"
+print_stdout = "warn"
+rc_buffer = "warn"
+rc_mutex = "warn"
+rest_pat_in_fully_bound_structs = "warn"
+same_name_method = "warn"
+str_to_string = "warn"
+string_slice = "warn"
+todo = "warn"
+unimplemented = "warn"
+unnecessary_safety_comment = "warn"
+unnecessary_safety_doc = "warn"
+unnecessary_self_imports = "warn"
+unneeded_field_pattern = "warn"
+unreachable = "warn"
+unwrap_in_result = "warn"
+unwrap_used = "warn"
+verbose_file_reads = "warn"
+wildcard_dependencies = "warn"

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/stratus-icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>scribe</title>
+    <style>
+
+      html, body, #app {
+        background-color: var(--color-surface, #0b0b0b);
+        color: var(--color-content, #e6e6e6);
+        margin: 0;
+        height: 100%;
+      }
+      html.theme-light, html.theme-light body, html.theme-light #app {
+        background-color: var(--color-surface, #f7f7f6);
+        color: var(--color-content, #1f1f1f);
+      }
+</style>
+  </head>
+
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
