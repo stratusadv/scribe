@@ -1,6 +1,6 @@
 [package]
 name = "scribe"
-version = "0.1.0"
+version = "0.1.1"
 description = "scribe"
 authors = ["Brayden Carlson"]
 edition = "2024"
