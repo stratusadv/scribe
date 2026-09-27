@@ -11,6 +11,15 @@ A desktop app that turns a meeting recording into formatted notes.
 
 A recording dropped onto the window is transcribed on an API. A template then shapes the transcript into notes, which are edited in place and exported to Word or PDF. Each template is a short instruction to the AI, so a meeting summary, a policy document, and a handover document are each one template away.
 
+## Install
+
+Every installer is on the [latest release](https://github.com/stratusadv/scribe/releases/latest). The app updates itself after that.
+
+- **Windows 10 / 11**: download `scribe_<version>_x64-setup.exe` and run it. SmartScreen may warn because the installer is unsigned; choose *More info*, then *Run anyway*. WebView2 installs itself if missing.
+- **Ubuntu / Debian**: download `scribe_<version>_amd64.deb`, then `sudo apt install ./scribe_<version>_amd64.deb`.
+- **Fedora**: download `scribe-<version>-1.x86_64.rpm`, then `sudo dnf install ./scribe-<version>-1.x86_64.rpm`.
+- **Arch / Omarchy and any other Linux**: download `scribe_<version>_amd64.AppImage`, `chmod +x` it, and run it. No packages required.
+
 ## Setup
 
 A build made from a checkout whose `.env` holds the API address and the two keys needs no setup. Otherwise, open Settings and enter the API address, the transcription key, and the notes key. A value entered there always wins over the built-in one.
