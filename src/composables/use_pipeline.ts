@@ -1,6 +1,5 @@
-import { nextTick, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { ipc } from '../lib/ipc'
-import { performance_mark, performance_measure } from '../lib/performance'
 import { use_notes_templates } from './use_notes_templates'
 import { use_settings } from './use_settings'
 import type { JobMeta, LineCorrection, Transcript, Waveform } from '../types'
@@ -34,21 +33,10 @@ watch(view_current, () => {
     view_reopen_count.value = 0
 })
 
-function view_paint_measure() {
-    requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            performance_measure('view_switch', 'view_switch_start')
-        })
-    })
-}
-
 function view_set(view: View) {
     if (view_current.value === view) return
 
-    performance_mark('view_switch_start')
     view_current.value = view
-
-    void nextTick(view_paint_measure)
 }
 
 function view_reopen(view: View) {

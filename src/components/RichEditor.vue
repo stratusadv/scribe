@@ -14,7 +14,6 @@ import { use_dialog } from '../composables/use_dialog'
 import { clipboard_plain_text } from '../lib/clipboard_text'
 import { error_text_extract } from '../lib/errors'
 import { ipc } from '../lib/ipc'
-import { performance_mark, performance_measure } from '../lib/performance'
 import type { AIGenerateHandler, AIRewriteHandler, AIRewriteArgs } from '../types'
 
 
@@ -154,11 +153,7 @@ const editor = useEditor({
         clipboardTextSerializer: (slice) => clipboard_plain_text(slice.content),
     },
     onUpdate({ editor: editor_current }) {
-        performance_mark('editor_get_markdown_start')
-
         const markdown = markdown_of(editor_current)
-
-        performance_measure('editor_get_markdown', 'editor_get_markdown_start')
         markdown_emitted = markdown
 
         if (markdown !== props.modelValue) emit('update:modelValue', markdown)
@@ -241,9 +236,7 @@ function content_apply() {
 
     if (next === markdown_emitted) return
 
-    performance_mark('editor_set_content_start')
     editor_current.commands.setContent(next, { emitUpdate: false })
-    performance_measure('editor_set_content', 'editor_set_content_start')
     markdown_emitted = next
 }
 

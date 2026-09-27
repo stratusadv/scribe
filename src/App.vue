@@ -22,7 +22,6 @@ import { use_network } from './composables/use_network'
 import { use_drag_drop } from './composables/use_drag_drop'
 import { use_theme } from './composables/use_theme'
 import { use_update } from './composables/use_update'
-import { performance_mark, performance_measure } from './lib/performance'
 
 
 const { view_current, view_reopen_count } = use_pipeline()
@@ -84,8 +83,6 @@ function editor_prefetch() {
 }
 
 onMounted(async () => {
-    performance_mark('app_refresh_start')
-
     await Promise.all([
         settings_refresh(),
         service_refresh(),
@@ -98,11 +95,8 @@ onMounted(async () => {
         document.fonts.load('1em "Geist Mono"'),
     ])
 
-    performance_measure('app_refresh', 'app_refresh_start')
-
     ready.value = true
 
-    performance_measure('app_ready')
     editor_prefetch()
 
     void update_check_startup()
