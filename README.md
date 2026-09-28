@@ -2,7 +2,7 @@
     <picture>
         <source media="(prefers-color-scheme: dark)" srcset="assets/scribe-lockup-outline-on-dark.svg">
         <source media="(prefers-color-scheme: light)" srcset="assets/scribe-lockup-outline-on-light.svg">
-        <img alt="scribe" src="assets/scribe-lockup-outline-on-light.svg" width="500">
+        <img alt="scribe" src="assets/scribe-lockup-outline-on-light.svg" width="400">
     </picture>
 </p>
 
@@ -19,7 +19,11 @@
     <a href="LICENSE"><img alt="license" src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square"></a>
 </p>
 
-![Home screen](assets/home.png)
+<picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/home-dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="assets/home-light.png">
+    <img alt="The Home screen, with recordings shown as tiles" src="assets/home-light.png">
+</picture>
 
 ## Overview
 
