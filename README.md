@@ -66,6 +66,18 @@ bun tauri dev
 bun tauri build
 ```
 
+## Test
+
+There are three layers of tests, and the `test` workflow on GitHub Actions runs each of them on every push and pull request.
+
+- **Rust unit tests**: The backend modules carry their own tests for prompt building, transcript parsing, storage, export, and the HTTP layer. They run with `cargo test` in `src-tauri`.
+- **Frontend unit tests**: Vitest runs the frontend libraries, composables, and components in a simulated DOM, with the IPC layer mocked. They run with `bun run test:unit`.
+- **End-to-end tests**: Playwright drives the real frontend in Chromium against the in-browser Tauri mock, which stands in for the whole backend with seed data, so each screen and each action is exercised as a user would perform it. They run with `bun run test:e2e`, and the runner starts the development server itself.
+
+```
+bun run test
+```
+
 ## Release
 
 A push of a `v*` tag builds the Windows installer and the Linux packages on GitHub Actions, signs them, and publishes a release with the installers, their signatures, and the `latest.json` the updater reads. An installed copy checks that file at each launch and offers to install anything newer.
@@ -81,8 +93,8 @@ The public key lives in `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
 Each release bumps `version` in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `package.json` in one commit. The tag then triggers the build:
 
 ```
-git tag v0.1.3
-git push origin v0.1.3
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
 A local build signs the same way, with the key contents in the environment:

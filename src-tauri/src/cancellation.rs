@@ -106,4 +106,76 @@ mod tests {
         assert!(stream_id_validate("").is_err());
         assert!(stream_id_validate("stream-a").is_ok());
     }
+
+    #[test]
+    fn a_trigger_or_clear_for_an_unknown_stream_changes_nothing() {
+        let registry = CancellationRegistry::new();
+
+        registry.trigger("ghost");
+        registry.clear("ghost");
+
+        let flag = registry.register("ghost");
+
+        assert!(!is_cancelled(&flag));
+    }
+
+    #[test]
+    fn a_cleared_stream_re_registers_with_a_fresh_flag_while_the_old_one_keeps_its_state() {
+        let registry = CancellationRegistry::new();
+        let first = registry.register("stream-a");
+
+        registry.clear("stream-a");
+
+        let second = registry.register("stream-a");
+
+        registry.trigger("stream-a");
+
+        assert!(!is_cancelled(&first));
+        assert!(is_cancelled(&second));
+        assert!(!Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn a_handed_out_flag_is_the_one_the_registry_holds_until_it_is_cleared() {
+        let registry = CancellationRegistry::new();
+        let flag = registry.register("stream-a");
+        let observer = Arc::clone(&flag);
+
+        registry.trigger("stream-a");
+        registry.trigger("stream-a");
+
+        assert!(is_cancelled(&observer));
+        assert_eq!(Arc::strong_count(&flag), 3);
+
+        registry.clear("stream-a");
+
+        assert_eq!(Arc::strong_count(&flag), 2);
+        assert!(is_cancelled(&flag));
+    }
+
+    #[test]
+    fn clearing_one_stream_leaves_the_others_registered() {
+        let registry = CancellationRegistry::new();
+        let kept = registry.register("stream-a");
+        let dropped = registry.register("stream-b");
+
+        registry.clear("stream-b");
+        registry.trigger("stream-a");
+        registry.trigger("stream-b");
+
+        assert!(is_cancelled(&kept));
+        assert!(!is_cancelled(&dropped));
+    }
+
+    #[test]
+    fn a_trigger_from_another_thread_is_seen_by_the_flag_holder() {
+        let registry = CancellationRegistry::new();
+        let flag = registry.register("stream-a");
+
+        std::thread::scope(|scope| {
+            scope.spawn(|| registry.trigger("stream-a")).join().unwrap();
+        });
+
+        assert!(is_cancelled(&flag));
+    }
 }

@@ -100,4 +100,29 @@ mod tests {
         assert_eq!(api_path_resolve(Some("v2/chat"), API_PATH_CHAT_DEFAULT), "/v2/chat");
         assert_eq!(api_path_resolve(Some(" /v2/chat "), API_PATH_CHAT_DEFAULT), "/v2/chat");
     }
+
+    #[test]
+    fn resolved_fields_are_trimmed_and_each_path_has_its_own_default() {
+        let raw = concat!(
+            r#"{"id":"i","name":"n","purpose":"transcription","host":" https://h.test ","#,
+            r#""api_key":" k ","model":" m ","api_path_transcribe":"audio"}"#
+        );
+
+        let raw_minimal = r#"{"id":"i","name":"n","purpose":"notes","host":"h","model":"m"}"#;
+        let endpoint: APIEndpoint = serde_json::from_str(raw).unwrap();
+        let minimal: APIEndpoint = serde_json::from_str(raw_minimal).unwrap();
+
+        assert_eq!(endpoint.purpose, APIEndpointPurpose::Transcription);
+        assert_eq!(endpoint.host_resolved(), "https://h.test");
+        assert_eq!(endpoint.api_key_resolved(), "k");
+        assert_eq!(endpoint.model_resolved(), "m");
+        assert_eq!(endpoint.api_path_transcribe_resolved(), "/audio");
+        assert_eq!(endpoint.api_path_chat_resolved(), API_PATH_CHAT_DEFAULT);
+        assert_eq!(minimal.purpose, APIEndpointPurpose::Notes);
+        assert_eq!(minimal.api_path_transcribe_resolved(), API_PATH_TRANSCRIBE_DEFAULT);
+        assert!(minimal.api_key.is_empty());
+        assert!(!minimal.has_api_key);
+        assert!(minimal.temperature.is_none());
+        assert!(serde_json::from_str::<APIEndpointPurpose>(r#""Notes""#).is_err());
+    }
 }

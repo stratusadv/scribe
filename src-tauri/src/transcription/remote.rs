@@ -643,6 +643,120 @@ fn samples_to_wav_bytes(samples: &[f32], sample_rate: u32) -> AppResult<Vec<u8>>
 mod tests {
     use super::*;
 
+    fn response_with(text: &str, segments: Option<Vec<(&str, f64, f64)>>) -> APIResponse {
+        APIResponse {
+            text: text.to_owned(),
+            segments: segments.map(|segments| {
+                segments
+                    .into_iter()
+                    .map(|(text, start, end)| APISegment { text: text.to_owned(), start, end })
+                    .collect()
+            }),
+        }
+    }
+
+    #[test]
+    fn assembled_chunks_are_joined_in_order_with_segment_times_shifted_by_their_offset() {
+        let completed = vec![
+            (0, response_with(" first ", Some(vec![("first", 0.5, 1.5)]))),
+            (1, response_with("", None)),
+            (2, response_with("third", None)),
+            (3, response_with("  ", Some(vec![]))),
+        ];
+
+        let transcript = transcribe_chunked_assemble(completed, 30.0);
+
+        assert_eq!(transcript.text, "first third");
+        assert_eq!(transcript.segments.len(), 2);
+        assert_eq!(transcript.segments[0].text, "first");
+        assert!((transcript.segments[0].start_seconds - 0.5).abs() < 1e-9);
+        assert!((transcript.segments[0].end_seconds - 1.5).abs() < 1e-9);
+        assert_eq!(transcript.segments[1].text, "third");
+        assert!((transcript.segments[1].start_seconds - 60.0).abs() < 1e-9);
+        assert!((transcript.segments[1].end_seconds - 90.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_empty_set_of_chunks_assembles_into_an_empty_transcript() {
+        let transcript = transcribe_chunked_assemble(Vec::new(), 30.0);
+
+        assert!(transcript.text.is_empty());
+        assert!(transcript.segments.is_empty());
+        assert!((chunk_offset_seconds(3, 30.0) - 90.0).abs() < 1e-9);
+        assert!(chunk_offset_seconds(0, 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn silent_chunks_are_pre_filled_and_a_drain_stops_at_the_first_gap() {
+        let mut pending = transcribe_chunked_pending(&[0, 2]);
+        let mut completed = Vec::new();
+        let mut next = 0;
+
+        assert_eq!(pending.len(), 2);
+        assert!(transcribe_chunked_pending(&[]).is_empty());
+
+        transcribe_chunked_drain(&mut pending, &mut completed, &mut next, None, 30.0);
+
+        assert_eq!(next, 1);
+        assert_eq!(completed.len(), 1);
+        assert!(transcribe_chunked_complete(&completed, 3).is_err());
+
+        drop(pending.insert(1, response_with("middle", None)));
+        transcribe_chunked_drain(&mut pending, &mut completed, &mut next, None, 30.0);
+
+        let order: Vec<u32> = completed.iter().map(|(index, _)| *index).collect();
+
+        assert_eq!(next, 3);
+        assert!(pending.is_empty());
+        assert!(transcribe_chunked_complete(&completed, 3).is_ok());
+        assert_eq!(order, vec![0, 1, 2]);
+        assert!(transcribe_chunked_complete(&[], 0).is_ok());
+    }
+
+    #[test]
+    fn a_chunk_payload_is_a_riff_wave_holding_exactly_its_samples() {
+        let bytes = samples_to_wav_bytes(&[0.0, 0.5, -0.5], 16000).unwrap();
+
+        assert!(bytes.starts_with(b"RIFF"));
+        assert_eq!(&bytes[8..12], b"WAVE");
+        assert_eq!(bytes.len(), 44 + 3 * PCM16_SAMPLE_BYTES as usize);
+    }
+
+    #[test]
+    fn chunks_are_named_by_index_and_a_wholly_silent_recording_uploads_nothing() {
+        let sample_rate = 16000;
+        let loud = vec![0.5_f32; sample_rate as usize * 4];
+        let quiet = vec![0.001_f32; sample_rate as usize * 3];
+        let (payloads, silent) = chunk_payloads_build(&loud, sample_rate, 2).expect("build");
+        let (none, all) = chunk_payloads_build(&quiet, sample_rate, 2).expect("build");
+
+        assert_eq!(payloads.len(), 2);
+        assert!(silent.is_empty());
+        assert_eq!(payloads[0].name, "chunk_0000.wav");
+        assert_eq!(payloads[1].name, "chunk_0001.wav");
+        assert_eq!(payloads[1].index, 1);
+        assert_eq!(payloads[0].bytes.len(), payloads[1].bytes.len());
+        assert!(none.is_empty());
+        assert_eq!(all, vec![0, 1]);
+        assert!(chunk_payloads_build(&[], sample_rate, 2).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn a_service_reply_tolerates_missing_text_or_segments() {
+        let text_only: APIResponse = serde_json::from_str(r#"{"text":"hi"}"#).unwrap();
+        let segments_only: APIResponse =
+            serde_json::from_str(r#"{"segments":[{"text":"a","end":2.5}]}"#).unwrap();
+
+        let segments = segments_only.segments.expect("segments");
+
+        assert_eq!(text_only.text, "hi");
+        assert!(text_only.segments.is_none());
+        assert_eq!(segments_only.text, "");
+        assert_eq!(segments[0].text, "a");
+        assert!(segments[0].start.abs() < f64::EPSILON);
+        assert!((segments[0].end - 2.5).abs() < f64::EPSILON);
+    }
+
     #[test]
     fn silent_chunks_are_skipped_not_uploaded() {
         let sample_rate = 16000;

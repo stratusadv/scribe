@@ -16,5 +16,5 @@
     "noUnusedParameters": true,
     "noUncheckedIndexedAccess": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["playwright.config.ts", "vite.config.ts"]
 }

@@ -256,6 +256,111 @@ fn body_error_friendly(body: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    #[test]
+    fn a_status_code_is_read_from_the_head_of_the_message_within_the_real_range() {
+        assert_eq!(api_status_code("100"), Some(100));
+        assert_eq!(api_status_code("599 model list: down"), Some(599));
+        assert_eq!(api_status_code("  429 chat completion: slow"), Some(429));
+        assert_eq!(api_status_code("99 too low"), None);
+        assert_eq!(api_status_code("600 too high"), None);
+        assert_eq!(api_status_code(""), None);
+        assert_eq!(api_status_code("boom: 500"), None);
+    }
+
+    #[test]
+    fn the_transient_range_starts_at_the_first_server_error_and_ends_at_the_last_status() {
+        assert!(!status_is_transient(499));
+        assert!(status_is_transient(500));
+        assert!(status_is_transient(599));
+        assert!(!status_is_transient(600));
+        assert!(!status_is_transient(428));
+        assert!(!status_is_transient(430));
+    }
+
+    #[test]
+    fn an_error_body_falls_back_to_its_type_and_then_to_the_bare_message() {
+        let typed = r#"{"error":{"message":"bad","code":"","type":"invalid_request_error"}}"#;
+        let coded = r#"{"error":{"message":"bad","code":"c","type":"t"}}"#;
+
+        assert_eq!(body_error_friendly(typed), Some("bad (invalid_request_error)".to_owned()));
+        assert_eq!(body_error_friendly(coded), Some("bad (c)".to_owned()));
+        assert_eq!(body_error_friendly(r#"{"error":{"message":"bad"}}"#), Some("bad".to_owned()));
+        assert_eq!(body_error_friendly(r#"{"error":{"message":"é ü"}}"#), Some("é ü".to_owned()));
+        assert_eq!(body_error_friendly(r#"{"message":"bad"}"#), None);
+        assert_eq!(body_error_friendly(""), None);
+    }
+
+    #[test]
+    fn errors_other_than_network_and_api_are_never_retried() {
+        let serde_error = serde_json::from_str::<u8>("x").unwrap_err();
+
+        assert!(!retry_is_transient(&AppError::Serde(serde_error)));
+        assert!(!retry_is_transient(&AppError::IO(std::io::Error::other("disk"))));
+        assert!(!retry_is_transient(&AppError::API("timed out without a status".into())));
+        assert!(retry_is_transient(&AppError::API("503 chat completion: busy".into())));
+    }
+
+    #[test]
+    fn a_client_is_built_without_a_read_timeout_too() {
+        let timeouts = ClientTimeouts {
+            connect: Duration::from_secs(1),
+            read: None,
+            request: Duration::from_secs(3),
+        };
+
+        assert!(client_build(&timeouts).is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_permanent_failure_is_returned_after_one_attempt() {
+        let attempts = AtomicU32::new(0);
+
+        let result: AppResult<()> = retry_run(|| async {
+            attempts.fetch_add(1, Ordering::SeqCst);
+
+            Err(AppError::API("400 chat completion: bad".into()))
+        })
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_is_retried_until_it_succeeds() {
+        let attempts = AtomicU32::new(0);
+
+        let recovered: AppResult<u32> = retry_run(|| async {
+            let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+
+            if attempt < 2 {
+                return Err(AppError::API("503 chat completion: busy".into()));
+            }
+
+            Ok(attempt)
+        })
+        .await;
+
+        assert_eq!(recovered.unwrap(), 2);
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn a_transient_failure_gives_up_after_the_last_attempt() {
+        let attempts = AtomicU32::new(0);
+
+        let result: AppResult<()> = retry_run(|| async {
+            attempts.fetch_add(1, Ordering::SeqCst);
+
+            Err(AppError::API("503 chat completion: busy".into()))
+        })
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), RETRY_ATTEMPTS_MAX);
+    }
 
     #[test]
     fn only_server_side_and_throttled_statuses_are_transient() {

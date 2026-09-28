@@ -25,3 +25,6 @@ dist-ssr
 
 .tigerstyle_cache/
 design
+
+test-results/
+playwright-report/

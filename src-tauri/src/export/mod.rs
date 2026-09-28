@@ -96,8 +96,19 @@ fn timestamps_strip(markdown: &str) -> String {
         if let Some(end_index) = timestamp_match_at(&chars, index) {
             debug_assert!(end_index > index);
 
-            without_timestamps.push(' ');
+            let at_line_start = index == 0 || chars.get(index - 1) == Some(&'\n');
+
             index = end_index;
+
+            if at_line_start {
+                while chars.get(index) == Some(&' ') {
+                    index += 1;
+                }
+
+                continue;
+            }
+
+            without_timestamps.push(' ');
 
             continue;
         }
@@ -377,6 +388,7 @@ pub(crate) async fn notes_print(app: AppHandle, job_id: String) -> AppResult<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::test_support::{meta_with, root_scoped};
 
     #[test]
     fn timestamp_markers_are_removed_and_spacing_is_tidied() {
@@ -384,6 +396,13 @@ mod tests {
             timestamps_strip("Budget approved [1:23] by Dana (12:04).\nNext item [0:07] .\n");
 
         assert_eq!(stripped, "Budget approved by Dana.\nNext item.\n");
+    }
+
+    #[test]
+    fn a_marker_at_the_start_of_a_line_leaves_no_leading_space() {
+        assert_eq!(timestamps_strip("[0:00] Hello\n"), "Hello\n");
+        assert_eq!(timestamps_strip("Intro\n[0:07] Second line\n"), "Intro\nSecond line\n");
+        assert_eq!(timestamps_strip("- [0:00] Hello\n"), "- Hello\n");
     }
 
     #[test]
@@ -409,5 +428,113 @@ mod tests {
     #[test]
     fn markup_characters_in_a_title_are_escaped() {
         assert_eq!(html_text_escape("a <b> & c"), "a &lt;b&gt; &amp; c");
+    }
+
+    #[test]
+    fn timestamps_of_every_supported_shape_are_removed_and_lookalikes_are_kept() {
+        assert_eq!(timestamps_strip("a [1:02:03] b\n"), "a b\n");
+        assert_eq!(timestamps_strip("a (0:07) b\n"), "a b\n");
+        assert_eq!(timestamps_strip("a [1:23\u{2013}1:45] b\n"), "a b\n");
+        assert_eq!(timestamps_strip("a [1:23 - 1:45] b\n"), "a b\n");
+        assert_eq!(timestamps_strip("a\t\t[1:00]\tb"), "a b");
+        assert_eq!(timestamps_strip("## Recap [0:10]\n- [0:00] Hello\n"), "## Recap\n- Hello\n");
+        assert_eq!(timestamps_strip("é [1:00] ü"), "é ü");
+        assert_eq!(timestamps_strip("a [12m 30s] b\n"), "a [12m 30s] b\n");
+        assert_eq!(timestamps_strip("a [a:b] b\n"), "a [a:b] b\n");
+        assert_eq!(timestamps_strip("a [:] b\n"), "a [:] b\n");
+        assert_eq!(timestamps_strip("a [1:23 b\n"), "a [1:23 b\n");
+        assert_eq!(timestamps_strip(""), "");
+    }
+
+    #[test]
+    fn runs_of_horizontal_space_collapse_and_line_ends_are_trimmed() {
+        assert_eq!(timestamps_strip_spaces_collapse("a \t  b\n\n  c"), "a b\n\n c");
+        assert_eq!(timestamps_strip_spaces_collapse(""), "");
+        assert_eq!(timestamps_strip_line_ends("a  \nb\t\n\nc "), "a\nb\n\nc");
+        assert_eq!(timestamps_strip_line_ends("no newline  "), "no newline");
+        assert_eq!(timestamps_strip_line_ends(""), "");
+    }
+
+    #[test]
+    fn punctuation_is_tightened_against_the_word_before_it_except_inside_a_task_marker() {
+        assert_eq!(timestamps_strip_punctuation_tighten("a , b ; c ) d ? e !"), "a, b; c) d? e!");
+        assert_eq!(timestamps_strip_punctuation_tighten("- [ ] todo"), "- [ ] todo");
+        assert_eq!(timestamps_strip_punctuation_tighten("x ] y"), "x] y");
+        assert_eq!(timestamps_strip_punctuation_tighten("é ."), "é.");
+        assert_eq!(timestamps_strip_punctuation_tighten(""), "");
+    }
+
+    #[test]
+    fn the_print_page_wraps_the_body_with_an_escaped_title() {
+        let page = print_page_html("A & <B>", "<h1>Body</h1>");
+
+        assert!(page.starts_with("<!doctype html>"));
+        assert!(page.contains("<title>A &amp; &lt;B&gt;</title>"));
+        assert!(page.contains("<h1>Body</h1>"));
+        assert!(page.ends_with("</body></html>"));
+        assert_eq!(html_text_escape(""), "");
+        assert_eq!(html_text_escape("\"quoted\" 'single'"), "\"quoted\" 'single'");
+    }
+
+    #[test]
+    fn an_asset_url_percent_encodes_every_byte_outside_the_unreserved_set() {
+        let url = asset_url(Path::new("/tmp/my notes/é~1.html"));
+        let prefix = if cfg!(windows) { "http://asset.localhost/" } else { "asset://localhost/" };
+
+        assert_eq!(url, format!("{prefix}%2Ftmp%2Fmy%20notes%2F%C3%A9~1.html"));
+        assert_eq!(asset_url(Path::new("")), prefix);
+    }
+
+    #[test]
+    fn notes_export_writes_markdown_or_docx_by_extension_and_refuses_the_rest() {
+        let _root = root_scoped("notes-export");
+        let id = workspace::job_id_from_text("export");
+        let target = workspace::root().unwrap().join("out");
+
+        assert!(notes_export_write_blocking(&id, &target.join("notes.md")).is_err());
+
+        workspace::notes_save(&id, "Budget approved [1:23].\n").unwrap();
+        notes_export_write_blocking(&id, &target.join("notes.md")).unwrap();
+        notes_export_write_blocking(&id, &target.join("notes.DOCX")).unwrap();
+
+        assert_eq!(fs::read_to_string(target.join("notes.md")).unwrap(), "Budget approved.\n");
+        assert!(fs::read(target.join("notes.DOCX")).unwrap().starts_with(b"PK\x03\x04"));
+        assert!(notes_export_write_blocking(&id, &target.join("notes.pdf")).is_err());
+        assert!(notes_export_write_blocking(&id, &target.join("notes")).is_err());
+
+        workspace::notes_save(&id, "  \n").unwrap();
+
+        assert!(notes_export_write_blocking(&id, &target.join("notes.md")).is_err());
+    }
+
+    #[test]
+    fn the_print_page_lands_in_the_job_folder_titled_from_its_metadata() {
+        let _root = root_scoped("notes-print");
+        let id = workspace::job_id_from_text("print");
+        let mut meta = meta_with(&id, 1);
+
+        assert!(notes_print_page_write_blocking(&id).is_err());
+
+        workspace::notes_save(&id, "# Agenda\n\nHello [0:01].\n").unwrap();
+
+        let path = notes_print_page_write_blocking(&id).unwrap();
+        let untitled = fs::read_to_string(&path).unwrap();
+
+        meta.title = Some("  ".to_owned());
+        workspace::meta_save(&meta).unwrap();
+
+        let blank = fs::read_to_string(notes_print_page_write_blocking(&id).unwrap()).unwrap();
+
+        meta.title = Some("Q3 <Review>".to_owned());
+        workspace::meta_save(&meta).unwrap();
+
+        let titled = fs::read_to_string(notes_print_page_write_blocking(&id).unwrap()).unwrap();
+
+        assert_eq!(path, workspace::job_directory(&id).unwrap().join(PRINT_FILE_NAME));
+        assert!(untitled.contains("<title>Notes</title>"));
+        assert!(untitled.contains("Agenda"));
+        assert!(untitled.contains("Hello."));
+        assert!(blank.contains("<title>Notes</title>"));
+        assert!(titled.contains("<title>Q3 &lt;Review&gt;</title>"));
     }
 }

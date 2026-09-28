@@ -188,7 +188,18 @@ fn ids_clean(ids: Vec<String>) -> Vec<String> {
     cleaned
 }
 
+#[cfg(test)]
+thread_local! {
+    static ROOT_OVERRIDE: std::cell::RefCell<Option<PathBuf>> =
+        const { std::cell::RefCell::new(None) };
+}
+
 pub(crate) fn root() -> AppResult<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = ROOT_OVERRIDE.with(|root| root.borrow().clone()) {
+        return Ok(path);
+    }
+
     let data_directory = dirs::data_dir()
         .ok_or_else(|| AppError::Config("could not resolve the data directory".into()))?;
 
@@ -786,6 +797,8 @@ pub(crate) fn engines_for_job(id: &str) -> AppResult<Vec<String>> {
         engines.push(engine.to_owned());
     }
 
+    engines.sort();
+
     debug_assert!(engines.len() <= ENGINE_COUNT_MAX as usize);
 
     Ok(engines)
@@ -853,8 +866,433 @@ fn sanitize_segment(segment: &str) -> String {
 }
 
 #[cfg(test)]
+pub(crate) mod test_support {
+    use super::{JobMeta, ROOT_OVERRIDE};
+    use std::fs;
+    use std::path::PathBuf;
+
+    pub(crate) struct RootScope {
+        path: PathBuf,
+    }
+
+    impl Drop for RootScope {
+        fn drop(&mut self) {
+            drop(ROOT_OVERRIDE.with(|root| root.borrow_mut().take()));
+            drop(fs::remove_dir_all(&self.path));
+        }
+    }
+
+    pub(crate) fn root_scoped(name: &str) -> RootScope {
+        let path = std::env::temp_dir().join(format!("scribe-test-{}-{name}", std::process::id()));
+
+        drop(fs::remove_dir_all(&path));
+        fs::create_dir_all(&path).unwrap();
+        ROOT_OVERRIDE.with(|root| *root.borrow_mut() = Some(path.clone()));
+
+        RootScope { path }
+    }
+
+    pub(crate) fn meta_with(id: &str, created_at_unix: i64) -> JobMeta {
+        JobMeta {
+            id: id.to_owned(),
+            source_path: "/tmp/source.wav".to_owned(),
+            source_size_bytes: 3,
+            created_at_unix,
+            recorded_at_unix: None,
+            label: None,
+            title: None,
+            attendees: Vec::new(),
+            person_ids: Vec::new(),
+            person_ids_mentioned: Vec::new(),
+            project: None,
+            tags: Vec::new(),
+            favourite: false,
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
+    use super::test_support::{meta_with, root_scoped};
     use super::*;
+    use crate::transcription::types::{Transcript, TranscriptSegment};
+
+    fn transcript_with(text: &str) -> Transcript {
+        Transcript {
+            text: text.to_owned(),
+            segments: vec![TranscriptSegment {
+                text: text.to_owned(),
+                start_seconds: 0.0,
+                end_seconds: 1.0,
+            }],
+        }
+    }
+
+    #[test]
+    fn the_data_folders_are_created_on_first_use() {
+        let _root = root_scoped("folders");
+        let jobs = jobs_directory().unwrap();
+        let settings = root_file_path("settings.json").unwrap();
+
+        assert!(jobs.is_dir());
+        assert_eq!(jobs, root().unwrap().join(JOBS_FOLDER));
+        assert!(settings.parent().unwrap().is_dir());
+        assert!(!settings.exists());
+    }
+
+    #[test]
+    fn metadata_survives_a_round_trip_through_its_job_folder() {
+        let _root = root_scoped("meta-round-trip");
+        let id = job_id_from_text("meta");
+        let mut meta = meta_with(&id, 10);
+
+        meta.title = Some("Kickoff".to_owned());
+        meta.tags = vec!["weekly".to_owned()];
+        meta.favourite = true;
+
+        assert!(meta_load(&id).unwrap().is_none());
+
+        meta_save(&meta).unwrap();
+
+        let loaded = meta_load(&id).unwrap().expect("saved meta");
+
+        assert_eq!(loaded.id, id);
+        assert_eq!(loaded.title.as_deref(), Some("Kickoff"));
+        assert_eq!(loaded.tags, vec!["weekly".to_owned()]);
+        assert!(loaded.favourite);
+        assert!(meta_load("not-a-job-id").is_err());
+    }
+
+    #[test]
+    fn metadata_written_by_an_older_build_still_reads() {
+        let raw = r#"{"id":"x","source_path":"p","source_size_bytes":1,"created_at_unix":2}"#;
+        let meta: JobMeta = serde_json::from_str(raw).unwrap();
+        let patch: JobMetaPatch = serde_json::from_str("{}").unwrap();
+
+        assert!(meta.title.is_none());
+        assert!(meta.attendees.is_empty());
+        assert!(!meta.favourite);
+        assert!(patch.title.is_none());
+        assert!(patch.favourite.is_none());
+    }
+
+    #[test]
+    fn a_listing_serializes_its_metadata_flat_beside_the_derived_fields() {
+        let listing = JobListing {
+            meta: meta_with("abc", 1),
+            has_transcript: true,
+            has_notes: false,
+            duration_seconds: Some(1.5),
+        };
+
+        let value = serde_json::to_value(&listing).unwrap();
+
+        assert_eq!(value["id"], "abc");
+        assert_eq!(value["has_transcript"], true);
+        assert_eq!(value["has_notes"], false);
+        assert_eq!(value["duration_seconds"], 1.5);
+    }
+
+    #[test]
+    fn notes_survive_a_round_trip_and_missing_notes_read_as_none() {
+        let _root = root_scoped("notes-round-trip");
+        let id = job_id_from_text("notes");
+
+        assert!(notes_load(&id).unwrap().is_none());
+
+        notes_save(&id, "# Notes\n\nCafé\n").unwrap();
+
+        assert_eq!(notes_load(&id).unwrap().as_deref(), Some("# Notes\n\nCafé\n"));
+
+        let oversized = "a".repeat(NOTES_BYTES_MAX as usize + 1);
+
+        assert!(notes_save(&id, &oversized).is_err());
+        assert_eq!(notes_load(&id).unwrap().as_deref(), Some("# Notes\n\nCafé\n"));
+    }
+
+    #[test]
+    fn a_transcript_is_stored_per_engine_and_listed_by_engines_for_job() {
+        let _root = root_scoped("transcript-round-trip");
+        let id = job_id_from_text("transcript");
+
+        assert!(engines_for_job(&id).unwrap().is_empty());
+        assert!(transcript_load::<Transcript>(&id, "remote-a").unwrap().is_none());
+
+        transcript_save(&id, "remote-b", &transcript_with("second")).unwrap();
+        transcript_save(&id, "remote-a", &transcript_with("first")).unwrap();
+        notes_save(&id, "notes").unwrap();
+
+        let engines = engines_for_job(&id).unwrap();
+        let loaded = transcript_load::<Transcript>(&id, "remote-a").unwrap().expect("saved");
+
+        assert_eq!(engines, vec!["remote-a".to_owned(), "remote-b".to_owned()]);
+        assert_eq!(loaded.text, "first");
+        assert_eq!(loaded.segments.len(), 1);
+        assert!(engines_for_job("nope").is_err());
+    }
+
+    #[test]
+    fn an_edited_transcript_replaces_the_stored_one_and_needs_one_to_replace() {
+        let _root = root_scoped("transcript-edited");
+        let id = job_id_from_text("edited");
+
+        assert!(transcript_save_edited(&id, &transcript_with("orphan")).is_err());
+
+        transcript_save(&id, "imported", &transcript_with("before")).unwrap();
+        transcript_save_edited(&id, &transcript_with("after")).unwrap();
+
+        let loaded = transcript_load::<Transcript>(&id, "imported").unwrap().expect("saved");
+
+        assert_eq!(loaded.text, "after");
+        assert_eq!(engines_for_job(&id).unwrap(), vec!["imported".to_owned()]);
+    }
+
+    #[test]
+    fn a_transcript_path_keeps_an_unsafe_engine_id_inside_the_job_folder() {
+        let _root = root_scoped("transcript-path");
+        let id = job_id_from_text("path");
+        let path = job_transcript_path(&id, "../remote/x").unwrap();
+
+        assert_eq!(path.file_name().unwrap(), "transcript-.._remote_x.json");
+        assert_eq!(path.parent().unwrap(), jobs_directory().unwrap().join(&id));
+    }
+
+    #[test]
+    fn jobs_are_listed_newest_first_and_folders_without_readable_metadata_are_skipped() {
+        let _root = root_scoped("jobs-list");
+        let ids = ["old", "new", "middle"].map(job_id_from_text);
+
+        meta_save(&meta_with(&ids[0], 100)).unwrap();
+        meta_save(&meta_with(&ids[1], 300)).unwrap();
+        meta_save(&meta_with(&ids[2], 200)).unwrap();
+
+        let jobs = jobs_directory().unwrap();
+
+        fs::create_dir_all(jobs.join(job_id_from_text("no-meta"))).unwrap();
+        fs::write(jobs.join("stray.txt"), b"x").unwrap();
+        fs::write(job_meta_path(&job_id_from_text("broken")).unwrap(), b"{not json").unwrap();
+
+        let listed: Vec<String> = jobs_list_all().unwrap().into_iter().map(|job| job.id).collect();
+
+        assert_eq!(listed, vec![ids[1].clone(), ids[2].clone(), ids[0].clone()]);
+    }
+
+    #[test]
+    fn a_listing_reports_transcript_notes_and_audio_duration_per_job() {
+        let _root = root_scoped("jobs-listing");
+        let full = job_id_from_text("full");
+        let bare = job_id_from_text("bare");
+        let samples = vec![0.0_f32; 8000];
+
+        meta_save(&meta_with(&full, 2)).unwrap();
+        meta_save(&meta_with(&bare, 1)).unwrap();
+        transcript_save(&full, "imported", &transcript_with("hello")).unwrap();
+        notes_save(&full, "notes").unwrap();
+        notes_save(&bare, "").unwrap();
+        audio_wav_save(&samples, 16000, &job_audio_path(&full).unwrap()).unwrap();
+        fs::write(job_audio_path(&bare).unwrap(), b"not a wav").unwrap();
+
+        let listings = jobs_listing_all().unwrap();
+
+        assert_eq!(listings.len(), 2);
+        assert_eq!(listings[0].meta.id, full);
+        assert!(listings[0].has_transcript);
+        assert!(listings[0].has_notes);
+        assert!((listings[0].duration_seconds.unwrap() - 0.5).abs() < 1e-9);
+        assert_eq!(listings[1].meta.id, bare);
+        assert!(!listings[1].has_transcript);
+        assert!(!listings[1].has_notes);
+        assert!(listings[1].duration_seconds.is_none());
+    }
+
+    #[test]
+    fn deleting_a_job_removes_its_folder_and_a_missing_one_is_not_an_error() {
+        let _root = root_scoped("job-delete");
+        let id = job_id_from_text("delete");
+
+        meta_save(&meta_with(&id, 1)).unwrap();
+        notes_save(&id, "notes").unwrap();
+
+        let directory = jobs_directory().unwrap().join(&id);
+
+        assert!(directory.exists());
+
+        job_delete(&id).unwrap();
+
+        assert!(!directory.exists());
+        assert!(meta_load(&id).unwrap().is_none());
+
+        job_delete(&id).unwrap();
+
+        assert!(job_delete("../jobs").is_err());
+    }
+
+    #[test]
+    fn a_patch_updates_only_the_fields_it_carries_and_is_refused_for_a_foreign_folder() {
+        let _root = root_scoped("meta-patch");
+        let id = job_id_from_text("patch");
+        let foreign = job_id_from_text("foreign");
+        let mut meta = meta_with(&id, 1);
+
+        meta.title = Some("Before".to_owned());
+        meta.project = Some("Website".to_owned());
+        meta_save(&meta).unwrap();
+
+        let patch = JobMetaPatch {
+            title: Some("  After  ".to_owned()),
+            tags: Some(vec![" weekly ".to_owned(), String::new()]),
+            favourite: Some(true),
+            ..JobMetaPatch::default()
+        };
+
+        let patched = meta_apply_patch(&id, patch).unwrap();
+        let encoded = serde_json::to_string(&meta).unwrap();
+
+        atomic_write(&job_meta_path(&foreign).unwrap(), encoded.as_bytes()).unwrap();
+
+        assert_eq!(patched.title.as_deref(), Some("After"));
+        assert_eq!(patched.project.as_deref(), Some("Website"));
+        assert_eq!(patched.tags, vec!["weekly".to_owned()]);
+        assert!(patched.favourite);
+        assert_eq!(meta_load(&id).unwrap().unwrap().title.as_deref(), Some("After"));
+        assert!(meta_apply_patch(&job_id_from_text("absent"), JobMetaPatch::default()).is_err());
+        assert!(meta_apply_patch(&foreign, JobMetaPatch::default()).is_err());
+    }
+
+    #[test]
+    fn a_search_reports_the_first_source_that_matches_per_job() {
+        let _root = root_scoped("jobs-search");
+        let titled = job_id_from_text("titled");
+        let noted = job_id_from_text("noted");
+        let spoken = job_id_from_text("spoken");
+        let mut meta = meta_with(&titled, 3);
+
+        meta.title = Some("Rollout plan".to_owned());
+        meta_save(&meta).unwrap();
+        meta_save(&meta_with(&noted, 2)).unwrap();
+        meta_save(&meta_with(&spoken, 1)).unwrap();
+        notes_save(&noted, "Line one.\nThe rollout slipped.\n").unwrap();
+        transcript_save(&spoken, "imported", &transcript_with("we discussed the ROLLOUT")).unwrap();
+        transcript_save(&titled, "imported", &transcript_with("rollout again")).unwrap();
+
+        let hits = jobs_search_all(" Rollout ").unwrap();
+
+        let found: Vec<(&str, &str)> = hits
+            .iter()
+            .map(|hit| (hit.job_id.as_str(), hit.source.as_str()))
+            .collect();
+
+        let expected = [
+            (titled.as_str(), "title"),
+            (noted.as_str(), "notes"),
+            (spoken.as_str(), "transcript"),
+        ];
+
+        assert_eq!(found, expected);
+        assert_eq!(hits[1].snippet, "The rollout slipped.");
+        assert!(jobs_search_all("absent").unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_atomic_write_replaces_the_file_in_place_and_leaves_no_temporary_behind() {
+        let _root = root_scoped("atomic-write");
+        let path = root().unwrap().join("nested").join("notes.md");
+        let blocked = root().unwrap().join("blocked");
+
+        atomic_write(&path, b"first").unwrap();
+        atomic_write(&path, b"second").unwrap();
+        fs::create_dir_all(&blocked).unwrap();
+
+        let names: Vec<String> = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+
+        assert_eq!(fs::read_to_string(&path).unwrap(), "second");
+        assert_eq!(names, vec!["notes.md".to_owned()]);
+        assert!(atomic_write(&blocked, b"x").is_err());
+        assert!(!blocked.with_extension("tmp").exists());
+    }
+
+    #[test]
+    fn audio_survives_a_round_trip_through_a_pcm16_wav_file() {
+        let _root = root_scoped("audio-round-trip");
+        let path = root().unwrap().join("audio.wav");
+        let samples = [0.0_f32, 0.5, -0.5, 1.0, -1.0];
+
+        audio_wav_save(&samples, 8000, &path).unwrap();
+
+        let (loaded, sample_rate) = audio_wav_load(&path).unwrap();
+        let duration_seconds = audio_wav_duration_seconds(&path).unwrap();
+
+        assert_eq!(sample_rate, 8000);
+        assert_eq!(loaded.len(), samples.len());
+        assert!((duration_seconds - 5.0 / 8000.0).abs() < 1e-9);
+
+        for (original, decoded) in samples.iter().zip(&loaded) {
+            assert!((original - decoded).abs() < 1.0 / f32::from(i16::MAX));
+        }
+    }
+
+    #[test]
+    fn audio_past_the_length_gate_is_refused_and_a_non_wav_file_does_not_open() {
+        let _root = root_scoped("audio-gates");
+        let path = root().unwrap().join("audio.wav");
+        let at_limit = vec![0.0_f32; usize::try_from(AUDIO_SECONDS_MAX).unwrap()];
+        let past_limit = vec![0.0_f32; usize::try_from(AUDIO_SECONDS_MAX).unwrap() + 1];
+
+        assert!(audio_wav_save(&past_limit, 1, &path).is_err());
+        assert!(audio_wav_save(&at_limit, 1, &path).is_ok());
+        assert!(wav_reader_open(&path).is_ok());
+
+        fs::write(&path, b"RIFF but not really").unwrap();
+
+        assert!(wav_reader_open(&path).is_err());
+        assert!(audio_wav_duration_seconds(&path).is_err());
+        assert!(audio_wav_load(&path).is_err());
+    }
+
+    #[test]
+    fn a_source_file_hashes_to_the_same_id_as_its_text() {
+        let _root = root_scoped("source-hash");
+        let path = root().unwrap().join("source.txt");
+        let multi_block = "x".repeat(HASH_BUFFER_BYTES as usize * 2 + 1);
+
+        fs::write(&path, b"hello").unwrap();
+
+        assert_eq!(job_id_from_source_content(&path).unwrap(), job_id_from_text("hello"));
+
+        fs::write(&path, b"").unwrap();
+
+        assert_eq!(job_id_from_source_content(&path).unwrap(), job_id_from_text(""));
+
+        fs::write(&path, &multi_block).unwrap();
+
+        assert_eq!(job_id_from_source_content(&path).unwrap(), job_id_from_text(&multi_block));
+        assert!(job_id_from_source_content(&root().unwrap().join("missing")).is_err());
+    }
+
+    #[test]
+    fn a_missing_file_is_an_error_and_an_empty_one_reads_as_empty() {
+        let _root = root_scoped("bounded-read");
+        let path = root().unwrap().join("empty.txt");
+
+        assert!(file_read_bounded(&path, 1).is_err());
+
+        fs::write(&path, b"").unwrap();
+
+        assert_eq!(file_read_bounded(&path, 1).unwrap(), "");
+    }
+
+    #[test]
+    fn names_keep_their_order_and_duplicates_while_ids_are_deduplicated() {
+        let names = vec![" b ".to_owned(), "a".to_owned(), "  ".to_owned(), "a".to_owned()];
+        let ids = vec!["b".to_owned(), "a".to_owned(), "b".to_owned()];
+
+        assert_eq!(names_clean(names), vec!["b".to_owned(), "a".to_owned(), "a".to_owned()]);
+        assert_eq!(ids_clean(ids), vec!["b".to_owned(), "a".to_owned()]);
+        assert!(names_clean(Vec::new()).is_empty());
+    }
 
     #[test]
     fn job_id_is_the_first_32_hex_chars_of_the_sha256() {

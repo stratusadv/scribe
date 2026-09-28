@@ -69,6 +69,54 @@ pub(crate) fn settings_save(settings: &Settings) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::test_support::root_scoped;
+    use std::fs;
+
+    #[test]
+    fn settings_are_written_to_disk_and_read_back() {
+        let _root = root_scoped("settings-store");
+
+        let settings = Settings {
+            theme: Some("thème".to_owned()),
+            jobs_view: Some("grid".to_owned()),
+            ..Settings::default()
+        };
+
+        assert!(settings_load().unwrap().theme.is_none());
+
+        settings_save(&settings).unwrap();
+
+        let loaded = settings_load().unwrap();
+
+        assert_eq!(loaded.theme.as_deref(), Some("thème"));
+        assert_eq!(loaded.jobs_view.as_deref(), Some("grid"));
+        assert!(loaded.api_host.is_none());
+    }
+
+    #[test]
+    fn a_damaged_settings_file_falls_back_to_defaults_and_an_oversized_one_is_refused() {
+        let _root = root_scoped("settings-damaged");
+        let path = workspace::root_file_path(SETTINGS_FILE).unwrap();
+        let directory = Some("x".repeat(SETTINGS_BYTES_MAX as usize));
+        let oversized = Settings { recordings_directory: directory, ..Settings::default() };
+
+        fs::write(&path, b"{ nope").unwrap();
+
+        assert!(settings_load().unwrap().theme.is_none());
+        assert!(settings_save(&oversized).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"{ nope");
+
+        fs::write(&path, "x".repeat(SETTINGS_BYTES_MAX as usize + 1)).unwrap();
+
+        assert!(settings_load().is_err());
+    }
+
+    #[test]
+    fn unknown_keys_in_a_settings_file_are_ignored() {
+        let restored: Settings = serde_json::from_str(r#"{"unknown":1,"theme":"dark"}"#).unwrap();
+
+        assert_eq!(restored.theme.as_deref(), Some("dark"));
+    }
 
     #[test]
     fn settings_survive_a_round_trip_through_json() {

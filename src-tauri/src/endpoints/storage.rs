@@ -206,7 +206,10 @@ pub(crate) fn endpoint_load(id: &str) -> AppResult<APIEndpoint> {
             endpoint.model = model;
         }
 
-        endpoint.reasoning_effort = settings.notes_thinking.filter(|effort| !effort.is_empty());
+        endpoint.reasoning_effort = settings
+            .notes_thinking
+            .map(|effort| effort.trim().to_owned())
+            .filter(|effort| !effort.is_empty());
     }
 
     debug_assert_eq!(endpoint.id, id);
@@ -253,6 +256,8 @@ pub(crate) fn api_key_set(purpose: APIEndpointPurpose, api_key: &str) -> AppResu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::settings_save;
+    use crate::workspace::test_support::root_scoped;
 
     #[test]
     fn api_key_user_overrides_builtin() {
@@ -305,5 +310,178 @@ mod tests {
             assert!(endpoint.api_key.is_empty());
             assert!(!endpoint.has_api_key);
         }
+    }
+
+    #[test]
+    fn builtin_endpoints_carry_chunking_only_for_transcription() {
+        let [transcription, notes] = builtins();
+
+        assert_eq!(transcription.purpose, APIEndpointPurpose::Transcription);
+        assert_eq!(transcription.transcribe_chunk_seconds, Some(TRANSCRIBE_CHUNK_SECONDS));
+        assert_eq!(transcription.transcribe_verbose, Some(false));
+        assert_eq!(transcription.model, MODEL_TRANSCRIPTION);
+        assert_eq!(notes.purpose, APIEndpointPurpose::Notes);
+        assert!(notes.transcribe_chunk_seconds.is_none());
+        assert!(notes.transcribe_verbose.is_none());
+        assert_eq!(notes.model, MODEL_NOTES);
+        assert_eq!(endpoint_id_for(APIEndpointPurpose::Notes), notes.id);
+        assert_eq!(endpoint_id_for(APIEndpointPurpose::Transcription), transcription.id);
+        assert!(api_key_builtin("unknown").is_none());
+    }
+
+    #[test]
+    fn a_saved_key_is_trimmed_reported_and_removed_again_with_its_file() {
+        let _root = root_scoped("endpoint-keys");
+        let path = workspace::root_file_path(KEYS_FILE).unwrap();
+
+        api_key_set(APIEndpointPurpose::Notes, "  user-key  ").unwrap();
+
+        let keys = keys_load().unwrap();
+        let status = service_status_load().unwrap();
+
+        assert_eq!(keys.get(ENDPOINT_ID_NOTES).map(String::as_str), Some("user-key"));
+        assert!(path.exists());
+        assert!(status.notes.user);
+        assert!(!status.transcription.user);
+        assert!(!status.host.user);
+
+        api_key_set(APIEndpointPurpose::Notes, "   ").unwrap();
+
+        assert!(keys_load().unwrap().is_empty());
+        assert!(!path.exists());
+        assert!(!service_status_load().unwrap().notes.user);
+    }
+
+    #[test]
+    fn a_key_past_its_length_is_refused_and_length_is_counted_in_characters() {
+        let _root = root_scoped("endpoint-key-length");
+        let at_limit = "é".repeat(API_KEY_CHARS_MAX as usize);
+        let past_limit = "k".repeat(API_KEY_CHARS_MAX as usize + 1);
+
+        assert!(api_key_set(APIEndpointPurpose::Transcription, &at_limit).is_ok());
+        assert!(api_key_set(APIEndpointPurpose::Transcription, &past_limit).is_err());
+        assert_eq!(keys_load().unwrap().get(ENDPOINT_ID_TRANSCRIPTION), Some(&at_limit));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn an_unreadable_key_store_is_treated_as_empty_rather_than_fatal() {
+        let _root = root_scoped("endpoint-keys-broken");
+        let path = workspace::root_file_path(KEYS_FILE).unwrap();
+
+        std::fs::write(&path, b"{ not json").unwrap();
+
+        assert!(keys_load().unwrap().is_empty());
+
+        api_key_set(APIEndpointPurpose::Notes, "fresh").unwrap();
+
+        assert_eq!(keys_load().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_loaded_notes_endpoint_takes_the_user_host_model_and_thinking_from_settings() {
+        let _root = root_scoped("endpoint-load");
+
+        let settings = Settings {
+            api_host: Some(" https://api.example.test/ ".to_owned()),
+            notes_model: Some("custom-model".to_owned()),
+            notes_thinking: Some("high".to_owned()),
+            ..Settings::default()
+        };
+
+        settings_save(&settings).unwrap();
+        api_key_set(APIEndpointPurpose::Notes, "k").unwrap();
+
+        let notes = endpoint_load(ENDPOINT_ID_NOTES).unwrap();
+        let transcription = endpoint_load(ENDPOINT_ID_TRANSCRIPTION).unwrap();
+        let transcription_builtin_key = api_key_builtin(ENDPOINT_ID_TRANSCRIPTION);
+
+        assert_eq!(notes.host, "https://api.example.test/");
+        assert_eq!(notes.model, "custom-model");
+        assert_eq!(notes.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(notes.api_key, "k");
+        assert!(notes.has_api_key);
+        assert_eq!(transcription.host, "https://api.example.test/");
+        assert_eq!(transcription.model, MODEL_TRANSCRIPTION);
+        assert!(transcription.reasoning_effort.is_none());
+        assert_eq!(transcription.api_key.is_empty(), transcription_builtin_key.is_none());
+        assert!(endpoint_load("unknown").is_err());
+    }
+
+    #[test]
+    fn blank_model_and_thinking_settings_fall_back_to_the_builtin_values() {
+        let _root = root_scoped("endpoint-load-blank");
+
+        let settings = Settings {
+            api_host: Some("https://api.example.test".to_owned()),
+            notes_model: Some("   ".to_owned()),
+            notes_thinking: Some(String::new()),
+            ..Settings::default()
+        };
+
+        settings_save(&settings).unwrap();
+
+        let notes = endpoint_load(ENDPOINT_ID_NOTES).unwrap();
+
+        assert_eq!(notes.model, MODEL_NOTES);
+        assert!(notes.reasoning_effort.is_none());
+    }
+
+    #[test]
+    fn a_thinking_setting_is_trimmed_and_whitespace_alone_counts_as_unset() {
+        let _root = root_scoped("endpoint-load-thinking-trim");
+
+        let settings = Settings {
+            api_host: Some("https://api.example.test".to_owned()),
+            notes_thinking: Some("  high ".to_owned()),
+            ..Settings::default()
+        };
+
+        settings_save(&settings).unwrap();
+
+        let loaded = endpoint_load(ENDPOINT_ID_NOTES).unwrap();
+
+        assert_eq!(loaded.reasoning_effort.as_deref(), Some("high"));
+
+        settings_save(&Settings { notes_thinking: Some("   ".to_owned()), ..settings }).unwrap();
+
+        assert!(endpoint_load(ENDPOINT_ID_NOTES).unwrap().reasoning_effort.is_none());
+    }
+
+    #[test]
+    fn without_a_user_host_an_endpoint_loads_only_when_a_builtin_host_exists() {
+        let _root = root_scoped("endpoint-load-no-host");
+
+        assert_eq!(endpoint_load(ENDPOINT_ID_NOTES).is_ok(), host_builtin().is_some());
+
+        settings_save(&Settings { api_host: Some("ftp://x".to_owned()), ..Settings::default() })
+            .unwrap();
+
+        assert!(endpoint_load(ENDPOINT_ID_NOTES).is_err());
+    }
+
+    #[test]
+    fn every_listed_endpoint_reports_its_key_without_carrying_it() {
+        let _root = root_scoped("endpoints-list");
+        let host = Some("https://h.test".to_owned());
+        let settings = Settings { api_host: host, ..Settings::default() };
+
+        api_key_set(APIEndpointPurpose::Notes, "k").unwrap();
+        settings_save(&settings).unwrap();
+
+        let endpoints = endpoints_load_all().unwrap();
+        let notes = endpoints.iter().find(|endpoint| endpoint.id == ENDPOINT_ID_NOTES).unwrap();
+
+        let transcription = endpoints
+            .iter()
+            .find(|endpoint| endpoint.id == ENDPOINT_ID_TRANSCRIPTION)
+            .unwrap();
+
+        assert_eq!(endpoints.len(), 2);
+        assert!(notes.has_api_key);
+        assert!(notes.api_key.is_empty());
+        assert_eq!(notes.host, "https://h.test");
+        assert_eq!(transcription.has_api_key, api_key_builtin(ENDPOINT_ID_TRANSCRIPTION).is_some());
+        assert!(transcription.api_key.is_empty());
     }
 }

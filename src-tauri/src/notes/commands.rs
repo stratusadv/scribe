@@ -609,6 +609,144 @@ fn meta_resolve(job_id: Option<&str>) -> AppResult<Option<JobMeta>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::people::storage::person_upsert;
+    use crate::workspace::test_support::{meta_with, root_scoped};
+
+    fn person_with(id: &str, name_first: &str, role: &str, description: &str) -> Person {
+        Person {
+            id: id.to_owned(),
+            name_first: name_first.to_owned(),
+            name_last: String::new(),
+            role: role.to_owned(),
+            description: description.to_owned(),
+        }
+    }
+
+    #[test]
+    fn title_case_handles_empty_text_small_words_and_non_ascii_initials() {
+        assert_eq!(title_case(""), "");
+        assert_eq!(title_case("   "), "");
+        assert_eq!(title_case("the"), "The");
+        assert_eq!(title_case("  élan   vital "), "Élan Vital");
+        assert_eq!(title_case("plan AND budget"), "Plan and Budget");
+        assert_eq!(title_case("ßtraße"), "SStraße");
+        assert_eq!(title_case("a-b of c"), "A-b of C");
+    }
+
+    #[test]
+    fn a_title_is_capped_in_characters_and_the_label_is_only_stripped_from_the_first_line() {
+        let long = "é".repeat(TITLE_CHARS_MAX as usize + 10);
+        let capped = title_clean(&long);
+
+        assert_eq!(capped.chars().count(), TITLE_CHARS_MAX as usize);
+        assert!(capped.starts_with('É'));
+        assert_eq!(title_clean("\n\n  Title:   \n"), "");
+        assert_eq!(title_clean("**Budget**\nTitle: ignored"), "Budget");
+        assert_eq!(title_clean("'quoted words'."), "Quoted Words");
+        assert_eq!(title_clean("Title:Kickoff"), "Kickoff");
+    }
+
+    #[test]
+    fn corrections_ignore_lines_that_are_not_numbered_and_keep_colons_inside_the_text() {
+        let reply = concat!(
+            "abc: not a number\n",
+            "-1: negative\n",
+            "99999999999: overflow\n",
+            "  2 : time is 10:30  \n",
+            "4: last line\n",
+            ": no number\n",
+            "3\n"
+        );
+
+        let corrections = corrections_parse(reply, 4);
+
+        assert_eq!(corrections.len(), 2);
+        assert_eq!(corrections[0].index, 1);
+        assert_eq!(corrections[0].text, "time is 10:30");
+        assert_eq!(corrections[1].index, 3);
+        assert_eq!(corrections[1].text, "last line");
+        assert!(corrections_parse("1: anything", 0).is_empty());
+        assert_eq!(corrections_parse("1: é", 1)[0].text, "é");
+    }
+
+    #[test]
+    fn a_code_fence_is_stripped_even_without_a_closing_fence_or_language() {
+        assert_eq!(code_fence_strip("```\n## A\n"), "## A");
+        assert_eq!(code_fence_strip("```json\n{}\n```"), "{}");
+        assert_eq!(code_fence_strip("```"), "");
+        assert_eq!(code_fence_strip("```\n```"), "");
+        assert_eq!(code_fence_strip("   \n"), "");
+        assert_eq!(code_fence_strip("text ``` inside"), "text ``` inside");
+    }
+
+    #[test]
+    fn limits_are_inclusive_and_instructions_are_counted_in_characters() {
+        let instruction_at_limit = "é".repeat(INSTRUCTION_CHARS_MAX as usize);
+        let transcript_at_limit = "a".repeat(PROMPT_TRANSCRIPT_BYTES_MAX as usize);
+
+        assert!(instruction_length_validate(&instruction_at_limit, "the instruction").is_ok());
+        assert!(instruction_length_validate("", "the instruction").is_ok());
+        assert!(transcript_text_validate(&transcript_at_limit).is_ok());
+        assert_eq!(lines_number(&[]), "");
+    }
+
+    #[test]
+    fn people_are_described_by_known_id_only_and_attendees_fill_in_when_none_are_known() {
+        let ann = Person { name_last: "Lee".to_owned(), ..person_with("a", "Ann", "CFO", "") };
+        let people = vec![ann, person_with("b", "Bo", "", "new hire")];
+        let ids = ["b".to_owned(), "zzz".to_owned(), "a".to_owned()];
+        let mut meta = meta_with("job", 1);
+
+        meta.attendees = vec!["Walk-in".to_owned()];
+
+        assert_eq!(people_describe(&ids, &people), "Bo: new hire; Ann Lee (CFO)");
+        assert_eq!(people_describe(&[], &people), "");
+        assert_eq!(people_present_describe(&meta, &people), "Walk-in");
+
+        meta.person_ids = vec!["a".to_owned()];
+
+        assert_eq!(people_present_describe(&meta, &people), "Ann Lee (CFO)");
+    }
+
+    #[test]
+    fn a_prompt_without_people_or_a_title_carries_only_the_details_it_has() {
+        let mut meta = meta_with("job", 1_737_460_800);
+
+        meta.tags = vec!["a".to_owned(), "b".to_owned()];
+
+        let prompt = prompt_build("Summarize.", "words", Some(&meta), &[]);
+
+        let head = concat!(
+            "Template:\nSummarize.\n\n",
+            "Tags: a, b\n",
+            "Recorded on: 2025-01-21\n",
+            "\nTranscript:\nwords",
+        );
+
+        assert!(prompt.starts_with(head));
+        assert!(!prompt.contains("Title:"));
+        assert!(!prompt.contains("People present:"));
+        assert!(prompt.ends_with(PROMPT_REMINDERS));
+    }
+
+    #[test]
+    fn resolving_metadata_and_people_touches_nothing_when_there_is_no_job_or_no_ids() {
+        let _root = root_scoped("notes-resolve");
+        let mut meta = meta_with(&workspace::job_id_from_text("resolve"), 1);
+
+        assert!(meta_resolve(None).unwrap().is_none());
+        assert!(meta_resolve(Some(&meta.id)).unwrap().is_none());
+        assert!(people_resolve(None).unwrap().is_empty());
+        assert!(people_resolve(Some(&meta)).unwrap().is_empty());
+
+        workspace::meta_save(&meta).unwrap();
+        person_upsert(&person_with("p", "Pat", "", "")).unwrap();
+        meta.person_ids_mentioned = vec!["p".to_owned()];
+
+        assert_eq!(meta_resolve(Some(&meta.id)).unwrap().unwrap().id, meta.id);
+        assert_eq!(people_resolve(Some(&meta)).unwrap().len(), 1);
+        assert!(meta_resolve(Some("bad id")).is_err());
+    }
 
     #[test]
     fn corrections_keep_only_numbered_lines_inside_the_transcript() {

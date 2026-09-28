@@ -318,6 +318,8 @@ fn person_validate(person: &Person) -> AppResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::test_support::root_scoped;
+    use std::fs;
 
     fn person_with(name_first: &str, name_last: &str) -> Person {
         Person {
@@ -387,5 +389,124 @@ mod tests {
         assert!(people_count_validate(&people_past_limit).is_err());
         assert!(groups_count_validate(&groups_at_limit).is_ok());
         assert!(groups_count_validate(&groups_past_limit).is_err());
+    }
+
+    #[test]
+    fn a_person_is_trimmed_on_every_field_and_capped_on_role_and_description() {
+        let mut person = person_with(" Jane ", " Doe ");
+        person.id = " id ".to_owned();
+        person.role = " PM ".to_owned();
+        person.description = " runs delivery ".to_owned();
+        let normalized = person_normalize(&person);
+        let mut roled = person_with("Jane", "Doe");
+        roled.role = "r".repeat(PERSON_ROLE_CHARS_MAX as usize + 1);
+        let mut described = person_with("Jane", "Doe");
+        described.description = "d".repeat(PERSON_DESCRIPTION_CHARS_MAX as usize + 1);
+        let mut unidentified = person_with("Jane", "Doe");
+        unidentified.id = String::new();
+
+        assert_eq!(normalized.id, "id");
+        assert_eq!(normalized.name_full(), "Jane Doe");
+        assert_eq!(normalized.role, "PM");
+        assert_eq!(normalized.description, "runs delivery");
+        assert!(person_validate(&roled).is_err());
+        assert!(person_validate(&described).is_err());
+        assert!(person_validate(&unidentified).is_err());
+    }
+
+    #[test]
+    fn a_group_is_capped_on_name_and_membership_and_needs_an_id() {
+        let name_at_limit = "n".repeat(GROUP_NAME_CHARS_MAX as usize);
+        let group = Group { id: "g".to_owned(), name: name_at_limit, person_ids: vec![] };
+        let name_past_limit = "n".repeat(GROUP_NAME_CHARS_MAX as usize + 1);
+        let overnamed = Group { name: name_past_limit, ..group.clone() };
+        let members = vec!["p".to_owned(); PEOPLE_COUNT_MAX as usize + 1];
+        let crowded = Group { person_ids: members, ..group.clone() };
+        let unidentified = Group { id: String::new(), ..group.clone() };
+        let restored: Group = serde_json::from_str(r#"{"id":"g","name":"Team"}"#).unwrap();
+
+        assert!(group_validate(&group).is_ok());
+        assert!(group_validate(&overnamed).is_err());
+        assert!(group_validate(&crowded).is_err());
+        assert!(group_validate(&unidentified).is_err());
+        assert!(restored.person_ids.is_empty());
+    }
+
+    #[test]
+    fn people_are_saved_once_per_id_and_load_back_normalized() {
+        let _root = root_scoped("people-store");
+        let mut person = person_with(" Jane ", " Doe ");
+        person.role = " PM ".to_owned();
+
+        assert!(people_load_all().unwrap().is_empty());
+
+        person_upsert(&person).unwrap();
+        person.name_last = "Roe".to_owned();
+        person_upsert(&person).unwrap();
+
+        let people = people_load_all().unwrap();
+
+        assert_eq!(people.len(), 1);
+        assert_eq!(people[0].name_full(), "Jane Roe");
+        assert_eq!(people[0].role, "PM");
+        assert!(person_upsert(&person_with("", "Doe")).is_err());
+        assert_eq!(people_load_all().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn deleting_a_person_also_drops_them_from_every_group() {
+        let _root = root_scoped("people-delete");
+
+        let group = Group {
+            id: "g".to_owned(),
+            name: "Team".to_owned(),
+            person_ids: vec!["test".to_owned(), "other".to_owned()],
+        };
+
+        person_upsert(&person_with("Jane", "Doe")).unwrap();
+        group_upsert(&group).unwrap();
+        person_delete("test").unwrap();
+
+        assert!(people_load_all().unwrap().is_empty());
+        assert_eq!(groups_load_all().unwrap()[0].person_ids, vec!["other".to_owned()]);
+
+        person_delete("test").unwrap();
+
+        assert_eq!(groups_load_all().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn groups_are_saved_once_per_id_and_removed_by_id() {
+        let _root = root_scoped("groups-store");
+        let group = Group { id: " g ".to_owned(), name: " Team ".to_owned(), person_ids: vec![] };
+
+        assert!(groups_load_all().unwrap().is_empty());
+
+        group_upsert(&group).unwrap();
+        group_upsert(&Group { name: "Renamed".to_owned(), ..group.clone() }).unwrap();
+
+        let groups = groups_load_all().unwrap();
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].id, "g");
+        assert_eq!(groups[0].name, "Renamed");
+
+        group_delete("g").unwrap();
+
+        assert!(groups_load_all().unwrap().is_empty());
+        assert!(group_upsert(&Group { id: String::new(), ..group }).is_err());
+    }
+
+    #[test]
+    fn a_damaged_people_or_groups_file_is_an_error_rather_than_an_empty_list() {
+        let _root = root_scoped("people-damaged");
+
+        fs::write(workspace::root_file_path(PEOPLE_FILE).unwrap(), b"[{").unwrap();
+        fs::write(workspace::root_file_path(GROUPS_FILE).unwrap(), b"nope").unwrap();
+
+        assert!(people_load_all().is_err());
+        assert!(groups_load_all().is_err());
+        assert!(person_upsert(&person_with("Jane", "Doe")).is_err());
+        assert!(group_delete("g").is_err());
     }
 }

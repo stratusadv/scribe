@@ -89,12 +89,21 @@ watch(rows_rendered, async () => {
 
 watch([rows_rendered, filter_regex, index_editing], highlights_apply, { flush: 'post' })
 
+function highlights_registry(): HighlightRegistry | null {
+    if (typeof CSS === 'undefined') return null
+
+    return CSS.highlights
+}
+
 function highlights_apply() {
+    const registry = highlights_registry()
     const regex = filter_regex.value
     const container = list_ref.value
 
+    if (!registry) return
+
     if (!regex || !container) {
-        CSS.highlights.delete(HIGHLIGHT_NAME)
+        registry.delete(HIGHLIGHT_NAME)
 
         return
     }
@@ -116,7 +125,7 @@ function highlights_apply() {
         }
     }
 
-    CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...ranges))
+    registry.set(HIGHLIGHT_NAME, new Highlight(...ranges))
 }
 
 function rows_render_grow() {
@@ -325,7 +334,7 @@ watch(() => job_id_current.value, () => {
 onUnmounted(() => {
     audio_pause_if_playing()
     audio_src_release()
-    CSS.highlights.delete(HIGHLIGHT_NAME)
+    highlights_registry()?.delete(HIGHLIGHT_NAME)
 })
 </script>
 

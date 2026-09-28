@@ -405,7 +405,7 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
                         class="input"
                         @change="notes_template_default_change"
                     >
-                        <option :value="null">Ask each time</option>
+                        <option value="">Ask each time</option>
                         <option
                             v-for="template in templates"
                             :key="template.id"

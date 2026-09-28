@@ -23,6 +23,7 @@ use tauri::{Emitter, Manager};
 
 pub(super) const EVENT_NOTES_CHUNK: &str = "notes_generate_chunk";
 const SSE_SEPARATOR: &[u8] = b"\n\n";
+const SSE_SEPARATOR_CRLF: &[u8] = b"\r\n\r\n";
 const SSE_DATA_PREFIX: &str = "data:";
 const SSE_DONE: &str = "[DONE]";
 const REQUEST_TIMEOUT_SECONDS: u64 = 900;
@@ -43,6 +44,7 @@ const HTTP_TIMEOUTS: ClientTimeouts = ClientTimeouts {
 };
 
 const _: () = assert!(!SSE_SEPARATOR.is_empty());
+const _: () = assert!(!SSE_SEPARATOR_CRLF.is_empty());
 const _: () = assert!(SSE_EVENT_BYTES_MAX < NOTES_BYTES_MAX);
 const _: () = assert!(NOTES_BYTES_MAX < REASONING_BYTES_MAX);
 const _: () = assert!(CONNECT_TIMEOUT_SECONDS < READ_TIMEOUT_SECONDS);
@@ -314,13 +316,12 @@ fn chunk_emit(app: &tauri::AppHandle, chunk: ChatChunk) {
 }
 
 fn chat_completion_stream_drain(app: &tauri::AppHandle, stream_id: &str, state: &mut StreamState) {
-    while let Some(position) = find_subsequence(&state.byte_buffer, SSE_SEPARATOR) {
-        debug_assert!(position + SSE_SEPARATOR.len() <= state.byte_buffer.len());
+    while let Some((position, separator_len)) = sse_event_end(&state.byte_buffer) {
+        debug_assert!(position + separator_len <= state.byte_buffer.len());
 
-        let event_bytes: Vec<u8> =
-            state.byte_buffer.drain(..position + SSE_SEPARATOR.len()).collect();
+        let event_bytes: Vec<u8> = state.byte_buffer.drain(..position + separator_len).collect();
 
-        debug_assert!(event_bytes.len() >= SSE_SEPARATOR.len());
+        debug_assert!(event_bytes.len() >= separator_len);
 
         let event_text = String::from_utf8_lossy(&event_bytes);
 
@@ -418,6 +419,13 @@ fn build_request<'prompt>(
     (url, body, endpoint.api_key_resolved())
 }
 
+fn sse_event_end(buffer: &[u8]) -> Option<(usize, usize)> {
+    [SSE_SEPARATOR, SSE_SEPARATOR_CRLF]
+        .into_iter()
+        .filter_map(|separator| Some((find_subsequence(buffer, separator)?, separator.len())))
+        .min_by_key(|(position, _)| *position)
+}
+
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     debug_assert!(!needle.is_empty());
 
@@ -433,6 +441,7 @@ fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::endpoints::types::APIEndpointPurpose;
 
     fn state_with(accumulated: &str, byte_buffer: &[u8], reasoning_bytes: u64) -> StreamState {
         StreamState {
@@ -442,11 +451,145 @@ mod tests {
         }
     }
 
+    fn endpoint_with(host: &str, reasoning_effort: Option<&str>) -> APIEndpoint {
+        APIEndpoint {
+            id: "builtin-notes".to_owned(),
+            name: "Notes".to_owned(),
+            purpose: APIEndpointPurpose::Notes,
+            host: host.to_owned(),
+            api_key: " secret ".to_owned(),
+            model: " stratus.thinking ".to_owned(),
+            temperature: Some(0.5),
+            output_tokens_max: Some(4096),
+            api_path_chat: None,
+            api_path_transcribe: None,
+            transcribe_verbose: None,
+            transcribe_chunk_seconds: None,
+            reasoning_effort: reasoning_effort.map(str::to_owned),
+            has_api_key: true,
+        }
+    }
+
+    #[test]
+    fn a_request_targets_the_chat_path_under_the_trimmed_host() {
+        let mut endpoint = endpoint_with(" https://api.example.test/ ", None);
+        let (url, body, api_key) = build_request(&endpoint, "sys", "user", false);
+
+        assert_eq!(url, "https://api.example.test/v1/chat/completions");
+        assert_eq!(api_key, "secret");
+        assert_eq!(body.model, "stratus.thinking");
+        assert!(!body.stream);
+
+        endpoint.api_path_chat = Some("custom/chat".to_owned());
+
+        let (url, body, _) = build_request(&endpoint, "sys", "user", true);
+
+        assert_eq!(url, "https://api.example.test/custom/chat");
+        assert!(body.stream);
+    }
+
+    #[test]
+    fn a_request_carries_the_system_prompt_before_the_user_prompt() {
+        let endpoint = endpoint_with("https://api.example.test", None);
+        let (_, body, _) = build_request(&endpoint, "be terse", "hello", true);
+        let value = serde_json::to_value(&body).unwrap();
+        let messages = value["messages"].as_array().unwrap();
+
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "be terse");
+        assert_eq!(messages[1]["role"], "user");
+        assert_eq!(messages[1]["content"], "hello");
+        assert_eq!(value["stream"], true);
+        assert_eq!(value["model"], "stratus.thinking");
+    }
+
+    #[test]
+    fn sampling_settings_are_forwarded_and_absent_ones_are_left_out_of_the_body() {
+        let endpoint = endpoint_with("https://api.example.test", None);
+        let mut bare = endpoint_with("https://api.example.test", Some("high"));
+
+        bare.temperature = None;
+        bare.output_tokens_max = None;
+
+        let value = serde_json::to_value(build_request(&endpoint, "s", "u", false).1).unwrap();
+        let value_bare = serde_json::to_value(build_request(&bare, "s", "u", false).1).unwrap();
+
+        assert_eq!(value["temperature"], 0.5);
+        assert_eq!(value["max_tokens"], 4096);
+        assert!(value.get("reasoning_effort").is_none());
+        assert_eq!(value["chat_template_kwargs"]["enable_thinking"], false);
+        assert!(value_bare.get("temperature").is_none());
+        assert!(value_bare.get("max_tokens").is_none());
+        assert_eq!(value_bare["reasoning_effort"], "high");
+        assert_eq!(value_bare["chat_template_kwargs"]["enable_thinking"], true);
+    }
+
+    #[test]
+    fn a_chat_reply_yields_its_first_content_or_nothing() {
+        let full: ChatResponse =
+            serde_json::from_str(r#"{"choices":[{"message":{"content":" hi "}},{}]}"#).unwrap();
+
+        let empty: ChatResponse = serde_json::from_str(r#"{"choices":[]}"#).unwrap();
+        let blank: ChatResponse = serde_json::from_str(r#"{"choices":[{"message":{}}]}"#).unwrap();
+        let bare: ChatResponse = serde_json::from_str(r#"{"choices":[{}]}"#).unwrap();
+
+        let content = |response: ChatResponse| {
+            response.choices.into_iter().next().and_then(|choice| choice.message)
+        };
+
+        assert_eq!(content(full).and_then(|message| message.content).as_deref(), Some(" hi "));
+        assert!(content(empty).is_none());
+        assert!(content(blank).and_then(|message| message.content).is_none());
+        assert!(content(bare).is_none());
+        assert!(serde_json::from_str::<ChatResponse>("{}").is_err());
+    }
+
+    #[test]
+    fn a_model_list_reads_only_the_ids() {
+        let raw = r#"{"object":"list","data":[{"id":"b","owned_by":"x"},{"id":"a"}]}"#;
+        let parsed: ModelsResponse = serde_json::from_str(raw).unwrap();
+        let ids: Vec<&str> = parsed.data.iter().map(|entry| entry.id.as_str()).collect();
+
+        assert_eq!(ids, vec!["b", "a"]);
+        assert!(serde_json::from_str::<ModelsResponse>(r#"{"data":[{}]}"#).is_err());
+    }
+
     #[test]
     fn an_event_boundary_is_found_only_on_a_full_separator() {
         assert_eq!(find_subsequence(b"data: a\n\ndata: b", SSE_SEPARATOR), Some(7));
         assert_eq!(find_subsequence(b"data: a\n", SSE_SEPARATOR), None);
         assert_eq!(find_subsequence(b"", SSE_SEPARATOR), None);
+    }
+
+    #[test]
+    fn an_event_ends_at_the_earliest_lf_or_crlf_separator() {
+        assert_eq!(sse_event_end(b"data: a\n\ndata: b"), Some((7, 2)));
+        assert_eq!(sse_event_end(b"data: a\r\n\r\ndata: b"), Some((7, 4)));
+        assert_eq!(sse_event_end(b"data: a\r\n\r\ndata: b\n\n"), Some((7, 4)));
+        assert_eq!(sse_event_end(b"data: a\n\ndata: b\r\n\r\n"), Some((7, 2)));
+        assert_eq!(sse_event_end(b"data: a\r\n"), None);
+    }
+
+    #[test]
+    fn a_subsequence_is_reported_at_its_first_position_and_never_past_the_end() {
+        assert_eq!(find_subsequence(b"\n\n", SSE_SEPARATOR), Some(0));
+        assert_eq!(find_subsequence(b"a\n\nb\n\n", SSE_SEPARATOR), Some(1));
+        assert_eq!(find_subsequence(b"ab\n\n", SSE_SEPARATOR), Some(2));
+        assert_eq!(find_subsequence(b"\n", SSE_SEPARATOR), None);
+        assert_eq!(find_subsequence(b"\n\r\n", SSE_SEPARATOR), None);
+        assert_eq!(find_subsequence(b"abc", b"abcd"), None);
+        assert_eq!(find_subsequence(b"abc", b"c"), Some(2));
+    }
+
+    #[test]
+    fn a_stream_exactly_at_a_limit_is_still_accepted() {
+        let notes_at_limit = "a".repeat(NOTES_BYTES_MAX as usize);
+        let event_at_limit = vec![0_u8; SSE_EVENT_BYTES_MAX as usize];
+
+        assert!(chat_completion_stream_limits(&state_with(&notes_at_limit, b"", 0)).is_ok());
+        assert!(chat_completion_stream_limits(&state_with("", &event_at_limit, 0)).is_ok());
+        assert!(chat_completion_stream_limits(&state_with("", b"", 0)).is_ok());
     }
 
     #[test]

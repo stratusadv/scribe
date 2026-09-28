@@ -344,6 +344,8 @@ fn default_templates_seed() -> Vec<NotesTemplate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::test_support::root_scoped;
+    use std::fs;
 
     #[test]
     fn an_unedited_seed_takes_the_current_wording_and_an_edited_one_keeps_its_own() {
@@ -422,5 +424,127 @@ mod tests {
 
         assert!(templates_count_validate(&at_limit).is_ok());
         assert!(templates_count_validate(&past_limit).is_err());
+    }
+
+    #[test]
+    fn seeds_refresh_touches_only_known_unedited_ids() {
+        let mut templates = vec![
+            NotesTemplate {
+                id: "custom".to_owned(),
+                name: "Custom".to_owned(),
+                description: "d".to_owned(),
+                instructions: "i".to_owned(),
+                edited: false,
+            },
+            NotesTemplate {
+                id: "default-procedure".to_owned(),
+                name: "Step-by-step procedure".to_owned(),
+                description: "old".to_owned(),
+                instructions: INSTRUCTIONS_PROCEDURE.to_owned(),
+                edited: false,
+            },
+        ];
+
+        assert!(seeds_refresh(&mut templates));
+        assert_eq!(templates[0].instructions, "i");
+        assert_eq!(templates[0].description, "d");
+        assert!(templates[1].description.starts_with("How to do a task"));
+        assert!(!seeds_refresh(&mut templates));
+        assert!(!seeds_refresh(&mut []));
+    }
+
+    #[test]
+    fn a_template_exactly_at_its_limits_is_accepted_and_old_files_fill_in_defaults() {
+        let name = "n".repeat(TEMPLATE_NAME_CHARS_MAX as usize);
+        let instructions = "i".repeat(TEMPLATE_INSTRUCTIONS_CHARS_MAX as usize);
+        let mut template = template_with(&name, &instructions);
+        template.description = "d".repeat(TEMPLATE_DESCRIPTION_CHARS_MAX as usize);
+        let raw = r#"{"id":"t","name":"T","instructions":"x"}"#;
+        let restored: NotesTemplate = serde_json::from_str(raw).unwrap();
+
+        assert!(template_validate(&template).is_ok());
+        assert!(restored.description.is_empty());
+        assert!(!restored.edited);
+    }
+
+    #[test]
+    fn without_a_saved_file_the_seeds_are_served_and_nothing_is_written() {
+        let _root = root_scoped("templates-seed");
+        let path = workspace::root_file_path(TEMPLATES_FILE).unwrap();
+        let templates = templates_load_all().unwrap();
+        let mut ids: Vec<&str> = templates.iter().map(|template| template.id.as_str()).collect();
+
+        ids.sort_unstable();
+        ids.dedup();
+
+        assert_eq!(templates.len(), default_templates_seed().len());
+        assert_eq!(ids.len(), templates.len());
+        assert!(templates.iter().all(|template| !template.edited));
+        assert!(!path.exists());
+        assert_eq!(template_load("default-summary").unwrap().instructions, INSTRUCTIONS_SUMMARY);
+        assert!(template_load("absent").is_err());
+    }
+
+    #[test]
+    fn a_saved_template_is_marked_edited_and_survives_until_deleted() {
+        let _root = root_scoped("templates-store");
+        let template = template_with("Mine", "Write mine.");
+        let seed_count = default_templates_seed().len();
+
+        template_upsert(template.clone()).unwrap();
+
+        let saved = template_load("test").unwrap();
+
+        assert!(saved.edited);
+        assert_eq!(saved.name, "Mine");
+        assert_eq!(templates_load_all().unwrap().len(), seed_count + 1);
+
+        template_upsert(NotesTemplate { name: "Renamed".to_owned(), ..template }).unwrap();
+
+        assert_eq!(template_load("test").unwrap().name, "Renamed");
+        assert_eq!(templates_load_all().unwrap().len(), seed_count + 1);
+
+        template_delete("test").unwrap();
+
+        assert!(template_load("test").is_err());
+        assert_eq!(templates_load_all().unwrap().len(), seed_count);
+        assert!(template_upsert(template_with(" ", "x")).is_err());
+    }
+
+    #[test]
+    fn a_stale_unedited_seed_on_disk_is_refreshed_and_written_back() {
+        let _root = root_scoped("templates-refresh");
+        let path = workspace::root_file_path(TEMPLATES_FILE).unwrap();
+
+        let stale = vec![NotesTemplate {
+            id: "default-summary".to_owned(),
+            name: "Quick summary".to_owned(),
+            description: "old".to_owned(),
+            instructions: "old".to_owned(),
+            edited: false,
+        }];
+
+        fs::write(&path, serde_json::to_string(&stale).unwrap()).unwrap();
+
+        let templates = templates_load_all().unwrap();
+        let raw = fs::read_to_string(&path).unwrap();
+        let on_disk: Vec<NotesTemplate> = serde_json::from_str(&raw).unwrap();
+
+        assert_eq!(templates.len(), 1);
+        assert_eq!(templates[0].instructions, INSTRUCTIONS_SUMMARY);
+        assert_eq!(on_disk[0].instructions, INSTRUCTIONS_SUMMARY);
+        assert_eq!(on_disk[0].description, default_templates_seed()[1].description);
+        assert!(!on_disk[0].edited);
+    }
+
+    #[test]
+    fn a_damaged_templates_file_is_an_error_rather_than_the_seeds() {
+        let _root = root_scoped("templates-damaged");
+
+        fs::write(workspace::root_file_path(TEMPLATES_FILE).unwrap(), b"[").unwrap();
+
+        assert!(templates_load_all().is_err());
+        assert!(template_load("default-summary").is_err());
+        assert!(template_upsert(template_with("Mine", "x")).is_err());
     }
 }

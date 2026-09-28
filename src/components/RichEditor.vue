@@ -233,22 +233,24 @@ function ai_range_clamped(editor_current: Editor): AIRange | null {
     return { from: range.from, to }
 }
 
+const extensions = [
+    StarterKit.configure({ link: false }),
+    Link.configure({ openOnClick: false, autolink: true }),
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    Placeholder.configure({ placeholder: props.placeholder ?? 'Start writing…' }),
+    Table.configure({ resizable: false }),
+    TableRow,
+    TableHeader,
+    TableCell,
+    Markdown.configure({ html: true, transformPastedText: true, breaks: true }),
+    SelectionGuard,
+    SelectionInactive,
+]
+
 const editor = useEditor({
     content: props.modelValue,
-    extensions: [
-        StarterKit.configure({ link: false }),
-        Link.configure({ openOnClick: false, autolink: true }),
-        TaskList,
-        TaskItem.configure({ nested: true }),
-        Placeholder.configure({ placeholder: props.placeholder ?? 'Start writing…' }),
-        Table.configure({ resizable: false }),
-        TableRow,
-        TableHeader,
-        TableCell,
-        Markdown.configure({ html: true, transformPastedText: true, breaks: true }),
-        SelectionGuard,
-        SelectionInactive,
-    ],
+    extensions,
     editorProps: {
         clipboardTextSerializer: (slice) => clipboard_plain_text(slice.content),
     },
@@ -534,7 +536,7 @@ function fragment_of(content: Content, editor_current: Editor): Fragment {
     return node.type.name === 'doc' ? node.content : Fragment.from(node)
 }
 
-async function ai_content_build(raw: string, editor_current: Editor): Promise<Content> {
+async function ai_content_build(raw: string): Promise<Content> {
     let html = raw
 
     if (!looks_like_html(raw)) {
@@ -548,7 +550,7 @@ async function ai_content_build(raw: string, editor_current: Editor): Promise<Co
     if (html.trim().length === 0) html = raw
 
     try {
-        return generateJSON(html, editor_current.extensionManager.extensions) as JSONContent
+        return generateJSON(html, extensions) as JSONContent
     } catch (error) {
         console.warn('[editor] reply could not be parsed as a document', error)
 
@@ -608,7 +610,7 @@ async function ai_apply(instruction: string) {
             return
         }
 
-        const content = await ai_content_build(output_final, editor_after)
+        const content = await ai_content_build(output_final)
 
         if (!range) {
             editor_after.commands.setContent(content, { emitUpdate: true })

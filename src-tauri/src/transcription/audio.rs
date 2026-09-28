@@ -401,6 +401,136 @@ fn resample(input: &[f32], source_rate: u32, target_rate: u32) -> AppResult<Vec<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::test_support::root_scoped;
+    use crate::workspace::{audio_wav_save, root};
+    use std::fs;
+
+    #[test]
+    fn a_waveform_has_one_peak_per_bucket_and_none_for_empty_audio_or_zero_bars() {
+        let _root = root_scoped("waveform");
+        let path = root().unwrap().join("audio.wav");
+        let samples = [0.0_f32, 0.25, 0.5, 0.25, 1.0, 0.0];
+
+        audio_wav_save(&samples, 16000, &path).unwrap();
+
+        let waveform = waveform_compute(&path, 3).unwrap();
+        let capped = waveform_compute(&path, u32::MAX).unwrap();
+
+        assert_eq!(waveform.peaks.len(), 3);
+        assert!((waveform.peaks[0] - 0.25).abs() < 1e-4);
+        assert!((waveform.peaks[1] - 0.5).abs() < 1e-4);
+        assert!((waveform.peaks[2] - 1.0).abs() < 1e-6);
+        assert!((waveform.duration_seconds - 6.0 / 16000.0).abs() < 1e-9);
+        assert!(waveform_compute(&path, 0).unwrap().peaks.is_empty());
+        assert_eq!(capped.peaks.len(), samples.len());
+
+        audio_wav_save(&[], 16000, &path).unwrap();
+
+        assert!(waveform_compute(&path, 3).unwrap().peaks.is_empty());
+        assert!(waveform_compute(&path, 3).unwrap().duration_seconds.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn a_waveform_needs_16_bit_integer_samples() {
+        let _root = root_scoped("waveform-8bit");
+        let path = root().unwrap().join("audio.wav");
+
+        let spec = hound::WavSpec {
+            channels: 1,
+            sample_rate: 8000,
+            bits_per_sample: 8,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+
+        writer.write_sample(1_i8).unwrap();
+        writer.finalize().unwrap();
+
+        assert!(waveform_compute(&path, 1).is_err());
+    }
+
+    #[test]
+    fn a_partial_last_bucket_still_yields_a_peak() {
+        let samples: Vec<u8> = [0x1000_i16, 0x2000, 0x0800]
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect();
+
+        let peaks = waveform_peaks_scan(samples.as_slice(), 3, 2).expect("scan");
+
+        assert_eq!(peaks.len(), 2);
+        assert!((peaks[0] - 1.0).abs() < 1e-6);
+        assert!((peaks[1] - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn stereo_frames_with_a_dangling_sample_drop_it() {
+        assert_eq!(mix_to_mono(&[1.0, 1.0, 1.0], 2), vec![1.0]);
+        assert!(mix_to_mono(&[], 2).is_empty());
+        assert!(mix_to_mono(&[], 1).is_empty());
+    }
+
+    #[test]
+    fn resampling_halves_the_length_and_keeps_a_steady_signal_level() {
+        let input = vec![0.5_f32; 32000];
+        let output = resample(&input, 32000, 16000).unwrap();
+
+        assert!(output.len().abs_diff(16000) <= 1);
+        assert!(output.iter().all(|sample| sample.is_finite()));
+        assert!((output[8000] - 0.5).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_wav_loads_for_whisper_at_its_native_rate_or_resampled_to_it() {
+        let _root = root_scoped("load-for-whisper");
+        let native = root().unwrap().join("native.wav");
+        let slow = root().unwrap().join("slow.wav");
+        let samples = vec![0.25_f32; 8000];
+
+        audio_wav_save(&samples, SAMPLE_RATE_WHISPER, &native).unwrap();
+        audio_wav_save(&samples, 8000, &slow).unwrap();
+
+        let loaded_native = load_for_whisper(&native).unwrap();
+        let loaded_slow = load_for_whisper(&slow).unwrap();
+
+        assert_eq!(loaded_native.len(), samples.len());
+        assert!((loaded_native[100] - 0.25).abs() < 1e-3);
+        assert!(loaded_slow.len().abs_diff(16000) <= 1);
+        assert!((loaded_slow[8000] - 0.25).abs() < 1e-2);
+
+        fs::write(&native, b"not audio").unwrap();
+
+        assert!(load_for_whisper(&native).is_err());
+        assert!(load_for_whisper(&root().unwrap().join("missing.wav")).is_err());
+    }
+
+    #[test]
+    fn a_stereo_file_is_mixed_down_before_it_is_returned() {
+        let _root = root_scoped("load-stereo");
+        let path = root().unwrap().join("stereo.wav");
+
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: SAMPLE_RATE_WHISPER,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+
+        let mut writer = hound::WavWriter::create(&path, spec).unwrap();
+
+        for _frame in 0..100 {
+            writer.write_sample(i16::MAX).unwrap();
+            writer.write_sample(0_i16).unwrap();
+        }
+
+        writer.finalize().unwrap();
+
+        let mono = load_for_whisper(&path).unwrap();
+
+        assert_eq!(mono.len(), 100);
+        assert!((mono[50] - 0.5).abs() < 1e-3);
+    }
 
     #[test]
     fn peaks_are_normalised_against_the_loudest_bucket() {

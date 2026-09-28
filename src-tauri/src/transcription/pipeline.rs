@@ -387,6 +387,7 @@ fn transcript_import_segments(trimmed: &str) -> Vec<TranscriptSegment> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workspace::test_support::{meta_with, root_scoped};
 
     fn person_named(name_first: &str, name_last: &str) -> Person {
         Person {
@@ -452,5 +453,119 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
 
         assert!((now_unix - recorded_at_unix.unwrap()).abs() < 60);
+    }
+
+    #[test]
+    fn a_person_without_any_name_is_left_out_of_the_spelling_hint() {
+        let people = vec![person_named("", ""), person_named("Jane", "")];
+
+        assert_eq!(spelling_hint_build(&people), "Jane");
+    }
+
+    #[test]
+    fn an_imported_transcript_gets_a_job_with_metadata_and_one_segment_per_line() {
+        let _root = root_scoped("import");
+        let result = transcript_import_blocking("  Kickoff  ", "  first\n\nsecond  ").unwrap();
+        let meta = workspace::meta_load(&result.job_id).unwrap().expect("meta");
+
+        let stored = workspace::transcript_load::<Transcript>(&result.job_id, ENGINE_ID_IMPORTED)
+            .unwrap()
+            .expect("transcript");
+
+        assert_eq!(result.job_id, workspace::job_id_from_text("first\n\nsecond"));
+        assert_eq!(meta.title.as_deref(), Some("Kickoff"));
+        assert_eq!(meta.label.as_deref(), Some("Kickoff"));
+        assert_eq!(meta.source_path, SOURCE_PATH_IMPORTED);
+        assert_eq!(meta.source_size_bytes, 13);
+        assert!(meta.recorded_at_unix.is_none());
+        assert_eq!(result.transcript.text, "first\n\nsecond");
+        assert_eq!(stored.text, "first\n\nsecond");
+        assert_eq!(stored.segments.len(), 2);
+        assert_eq!(stored.segments[1].text, "second");
+        assert_eq!(
+            workspace::engines_for_job(&result.job_id).unwrap(),
+            vec![ENGINE_ID_IMPORTED.to_owned()]
+        );
+    }
+
+    #[test]
+    fn re_importing_the_same_text_keeps_the_first_title_and_creation_time() {
+        let _root = root_scoped("import-twice");
+        let first = transcript_import_blocking("", "same words").unwrap();
+        let mut meta = workspace::meta_load(&first.job_id).unwrap().expect("meta");
+
+        assert_eq!(meta.label.as_deref(), Some(LABEL_IMPORTED));
+        assert!(meta.title.is_none());
+
+        meta.created_at_unix = 5;
+        meta.title = Some("Kept".to_owned());
+        workspace::meta_save(&meta).unwrap();
+
+        let second = transcript_import_blocking("New title", "same words").unwrap();
+        let reloaded = workspace::meta_load(&second.job_id).unwrap().expect("meta");
+
+        assert_eq!(second.job_id, first.job_id);
+        assert_eq!(reloaded.created_at_unix, 5);
+        assert_eq!(reloaded.title.as_deref(), Some("Kept"));
+        assert_eq!(reloaded.label.as_deref(), Some(LABEL_IMPORTED));
+    }
+
+    #[test]
+    fn preparing_metadata_keeps_the_previous_record_and_only_refreshes_the_source() {
+        let _root = root_scoped("prepare-meta");
+        let source = root_path().join("meeting.wav");
+
+        std::fs::write(&source, b"abc").unwrap();
+
+        let metadata = std::fs::metadata(&source).unwrap();
+        let label = Some("meeting.wav".to_owned());
+        let fresh = audio_prepare_meta("id", &source, &metadata, label.clone(), None);
+        let mut previous = meta_with("id", 7);
+
+        previous.title = Some("Kept".to_owned());
+        previous.label = Some("old.wav".to_owned());
+
+        let kept = audio_prepare_meta("id", &source, &metadata, label, Some(previous));
+
+        assert_eq!(fresh.label.as_deref(), Some("meeting.wav"));
+        assert_eq!(fresh.source_size_bytes, 3);
+        assert!(fresh.title.is_none());
+        assert!(fresh.recorded_at_unix.is_some());
+        assert_eq!(kept.created_at_unix, 7);
+        assert_eq!(kept.title.as_deref(), Some("Kept"));
+        assert_eq!(kept.label.as_deref(), Some("old.wav"));
+        assert_eq!(kept.source_path, source.to_string_lossy());
+        assert_eq!(kept.source_size_bytes, 3);
+    }
+
+    #[test]
+    fn preparing_a_recording_writes_a_16k_mono_copy_into_its_job_folder_once() {
+        let _root = root_scoped("prepare-audio");
+        let source = root_path().join("meeting.wav");
+        let samples = vec![0.25_f32; 8000];
+
+        workspace::audio_wav_save(&samples, 8000, &source).unwrap();
+
+        let (job_id, audio_path) = audio_prepare_blocking(&source).unwrap();
+        let (prepared, sample_rate) = workspace::audio_wav_load(&audio_path).unwrap();
+        let meta = workspace::meta_load(&job_id).unwrap().expect("meta");
+
+        std::fs::write(&audio_path, b"kept").unwrap();
+
+        let (job_id_again, audio_path_again) = audio_prepare_blocking(&source).unwrap();
+
+        assert_eq!(job_id, workspace::job_id_from_source_content(&source).unwrap());
+        assert_eq!(audio_path, workspace::job_audio_path(&job_id).unwrap());
+        assert_eq!(sample_rate, SAMPLE_RATE_WHISPER);
+        assert!(prepared.len().abs_diff(16000) <= 1);
+        assert_eq!(meta.label.as_deref(), Some("meeting.wav"));
+        assert_eq!(meta.source_size_bytes, std::fs::metadata(&source).unwrap().len());
+        assert_eq!(job_id_again, job_id);
+        assert_eq!(std::fs::read(&audio_path_again).unwrap(), b"kept");
+        assert!(audio_prepare_blocking(&root_path().join("missing.wav")).is_err());
+    }
+
+    fn root_path() -> PathBuf {
+        workspace::root().unwrap()
     }
 }
