@@ -41,7 +41,7 @@ The People page holds each person once, with a role and a short description, so 
 
 ## Install
 
-Each installer is on the [latest release](https://github.com/stratusadv/scribe/releases/latest). An installed copy checks for a new version at each launch and offers to install it, so the installer is only needed once.
+Each installer is on the [download page](https://stratusadv.github.io/scribe/) and on the [latest release](https://github.com/stratusadv/scribe/releases/latest). An installed copy checks for a new version at each launch and offers to install it, so the installer is only needed once.
 
 | Platform | Installer | Notes |
 |----------|-----------|-------|
