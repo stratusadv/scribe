@@ -60,12 +60,12 @@ const API_KEY_FIELDS: APIKeyField[] = [
     {
         purpose: 'transcription',
         label: 'Transcription key',
-        hint: 'Lets scribe turn your recordings into text. Keep it private, like a password.',
+        hint: 'This key lets scribe turn your recordings into text. Keep it private, like a password.',
     },
     {
         purpose: 'notes',
         label: 'Notes key',
-        hint: 'Lets scribe write notes from a transcript. Keep it private, like a password.',
+        hint: 'This key lets scribe write notes from a transcript. Keep it private, like a password.',
     },
 ]
 
@@ -320,7 +320,7 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
             <div>
                 <h2 class="!mb-1 flex items-center">
                     Settings
-                    <InfoHint text="How scribe looks, where it saves, and your API keys." />
+                    <InfoHint text="This page covers how scribe looks, where it saves recordings, and your API keys." />
                 </h2>
             </div>
         </header>
@@ -397,7 +397,7 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
             <div>
                 <h3 class="mb-3 flex items-center">
                     Notes
-                    <InfoHint text="The template picked for you on each new recording. You can still choose another before generating." />
+                    <InfoHint text="This template is picked for each new recording. You can still choose another before generating." />
                 </h3>
                 <div>
                     <select
@@ -420,7 +420,7 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
             <div>
                 <h3 class="mb-3 flex items-center">
                     Recordings
-                    <InfoHint text="The folder where microphone recordings are saved." />
+                    <InfoHint text="The microphone recordings are saved in this folder." />
                 </h3>
                 <div>
                     <div class="flex gap-2 flex-wrap">
@@ -476,7 +476,7 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
             <div>
                 <h3 class="mb-3 flex items-center">
                     API address
-                    <InfoHint text="The web address of the API scribe sends recordings and transcripts to. Your company gives you this." />
+                    <InfoHint text="This is the web address of the API that scribe sends recordings and transcripts to. Your company gives you this." />
                 </h3>
                 <div class="flex gap-2 flex-wrap">
                     <input
@@ -546,7 +546,7 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
             <div>
                 <h3 class="mb-3 flex items-center">
                     Model
-                    <InfoHint text="The AI model that writes your notes." />
+                    <InfoHint text="This is the AI model that writes your notes." />
                 </h3>
                 <select
                     :value="settings.notes_model ?? ''"
@@ -563,7 +563,7 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
             <div>
                 <h3 class="mb-3 flex items-center">
                     Thinking
-                    <InfoHint text="How long the AI thinks before writing. More thinking gives more careful notes and takes longer." />
+                    <InfoHint text="This sets how long the AI thinks before writing. A longer setting gives more careful notes and takes longer." />
                 </h3>
                 <select
                     :value="settings.notes_thinking ?? ''"

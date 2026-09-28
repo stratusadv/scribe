@@ -48,7 +48,7 @@ const status_text = computed(() => {
         case 'available': return `scribe ${update_version.value ?? ''} is ready to install.`
         case 'downloading': return status_text_downloading()
         case 'installing': return 'Installing the update. scribe will restart in a moment.'
-        case 'error': return error_message.value ?? 'Could not check for updates.'
+        case 'error': return error_message.value ?? 'The update check failed.'
     }
 })
 
@@ -109,7 +109,7 @@ async function update_check(): Promise<boolean> {
     } catch (error) {
         phase.value = 'error'
 
-        error_message.value = 'Could not check for updates. Check your internet connection '
+        error_message.value = 'The update check failed. Check your internet connection '
             + `and try again. (${error_text_extract(error)})`
 
         return false

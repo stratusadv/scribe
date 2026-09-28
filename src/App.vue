@@ -114,7 +114,7 @@ onMounted(async () => {
             class="banner-shell"
             @dismiss="offline_banner_dismissed = true"
         >
-            You appear to be offline. Transcribing and writing notes need an internet connection.
+            You appear to be offline. An internet connection is needed to transcribe and to write notes.
         </NoticeBanner>
         <NoticeBanner
             v-if="update_banner_visible && !update_banner_dismissed"
@@ -135,7 +135,7 @@ onMounted(async () => {
             </main>
         </div>
         <div v-if="dragging_over" class="drop-overlay">
-            Drop audio or video file(s). Single opens for review, multiple batch-transcribe.
+            Drop audio or video files. A single file opens for review, and several files are transcribed in a batch.
         </div>
         <AppDialogHost />
     </div>

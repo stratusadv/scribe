@@ -60,7 +60,7 @@ function error_friendly_network(raw: string, lower: string): FriendlyError {
 
     return {
         title: 'Network problem',
-        message: 'Could not reach the server. Check your internet connection and try again. '
+        message: 'The server could not be reached. Check your internet connection and try again. '
             + `(${detail})`,
         kind: 'network',
     }

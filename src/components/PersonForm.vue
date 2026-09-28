@@ -78,7 +78,7 @@ function save_click() {
                 rows="3"
                 class="input flex-1 min-h-0 resize-none"
                 maxlength="2000"
-                placeholder="Anything the AI should know: what they look after, how they relate to the project, how they usually come up in meetings."
+                placeholder="Say what the AI should know: what they look after, how they relate to the project, and how they usually come up in meetings."
             />
         </div>
 

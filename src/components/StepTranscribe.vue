@@ -30,7 +30,7 @@ interface TypewriterPace {
 const EVENT_TRANSCRIPTION_SEGMENT = 'transcription_segment'
 const EVENT_TRANSCRIPTION_STAGE = 'transcription_stage'
 const COPIED_FLASH_MS = 1500
-const MESSAGE_NO_ENDPOINT = 'No remote endpoint selected'
+const MESSAGE_NO_ENDPOINT = 'No remote endpoint is selected.'
 const MESSAGE_NO_NOTES_KEY = 'Add your notes API key under Settings first.'
 
 const TYPEWRITER_PACES: TypewriterPace[] = [

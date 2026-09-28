@@ -87,10 +87,15 @@ const PROMPT_REWRITE_SYSTEM: &str = concat!(
     "'**bold**', '*italic*', '`code`', '> quote'.\n",
     "- Output ONLY the rewritten text. No preamble, no explanation, no surrounding code ",
     "fences.\n",
-    "- Preserve any Markdown formatting that already exists in the selected text.\n",
-    "- If the selection contains list items, keep the same list structure.\n",
-    "- When a template is given, the text is a document written to it or a part of one: keep ",
-    "the template's headings, sections, and their order, and never add sections it does not ",
+    "- The selected text is Markdown. Keep its structure exactly: the same block types in the ",
+    "same order, the same number of list items, headings stay headings, paragraphs stay ",
+    "paragraphs, and existing inline formatting stays. Change the wording only, unless the ",
+    "instruction itself asks for a different structure.\n",
+    "- The output replaces the selected text in place, so keep to its scope: a single line ",
+    "stays a single line and a paragraph stays a paragraph. Never grow a selection into a ",
+    "whole document, wrap it in headings or sections, or restate text outside it.\n",
+    "- When a template is given, the text is the whole document written to it: keep the ",
+    "template's headings, sections, and their order, and never add sections it does not ",
     "have or drop ones it does."
 );
 

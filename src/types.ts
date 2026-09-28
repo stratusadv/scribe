@@ -174,6 +174,7 @@ export interface JobSearchHit {
 export interface AIRewriteArgs {
     text: string
     instruction: string
+    whole_document: boolean
     on_chunk: (chunk: string) => void
 }
 

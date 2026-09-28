@@ -106,7 +106,7 @@ async function save_click() {
 
 async function delete_click(template: NotesTemplate) {
     const ok = await dialog_confirm(
-        `Delete the "${template.name}" template? Notes you already made with it are kept.`,
+        `Delete the "${template.name}" template? The notes you already made with it are kept.`,
         { title: 'Delete template', kind: 'warning' },
     )
 
@@ -180,7 +180,7 @@ use_shortcuts({
             <div class="flex flex-col flex-1 min-h-0">
                 <label class="label flex items-center">
                     What should the notes look like?
-                    <InfoHint text="Lay the notes out the way you want them: headings, bullet lists, tables, checklists. Under each heading, write a line saying what goes there. The AI fills it in from the recording." />
+                    <InfoHint text="Lay the notes out the way you want them: headings, bullet lists, tables, and checklists. Under each heading, write a line saying what goes there. The AI fills it in from the recording." />
                 </label>
                 <RichEditorAsync
                     v-model="edit.template.instructions"
@@ -223,6 +223,6 @@ use_shortcuts({
                 />
             </li>
         </ul>
-        <p v-else class="meta">No templates yet. Click Add template to make your first one.</p>
+        <p v-else class="meta">There are no templates yet. Click Add template to make your first one.</p>
     </section>
 </template>

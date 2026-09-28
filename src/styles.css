@@ -1093,7 +1093,6 @@
     .notes-empty {
         @apply flex items-center justify-center;
         height: 100%;
-        min-height: 24rem;
         border: 1px dashed var(--color-border-dashed);
         border-radius: var(--radius-lg);
     }
@@ -1215,6 +1214,20 @@
         color: var(--color-content-meta);
         border-bottom: 1px solid var(--color-border);
         white-space: nowrap;
+    }
+    .recording-table-sort {
+        @apply inline-flex items-center gap-1 text-xs font-medium;
+        padding: 0;
+        color: inherit;
+        background: transparent;
+    }
+    .recording-table-sort:hover,
+    .recording-table-sort[data-active="true"] {
+        color: var(--color-content-strong);
+    }
+    .recording-table-sort-mark {
+        display: inline-block;
+        width: 1em;
     }
     .recording-table td {
         padding: 0.625rem 0.75rem;
@@ -1535,7 +1548,7 @@
 
     .notes-split {
         @apply grid gap-3 flex-1;
-        min-height: 24rem;
+        min-height: 0;
         grid-template-columns: 1fr;
         grid-auto-rows: minmax(0, 1fr);
     }
@@ -1609,7 +1622,6 @@
         border-radius: var(--radius-lg);
         background-color: var(--color-panel);
         height: 100%;
-        min-height: 24rem;
     }
     .rich-editor[data-fullscreen="true"] {
         position: fixed;
@@ -1860,6 +1872,10 @@
         background-color: var(--color-chip);
         font-weight: 600;
     }
+    .rich-editor-content .ProseMirror .selection-inactive {
+        background-color: var(--color-accent-soft);
+        color: var(--color-content-strong);
+    }
     .rich-editor-content .ProseMirror .selectedCell {
         position: relative;
     }
@@ -1936,30 +1952,10 @@
         @apply text-xs;
         color: var(--color-danger-text);
     }
-    .rich-editor-ai-busy {
-        @apply flex items-center gap-2;
-    }
-    .rich-editor-ai-busy-label {
-        @apply text-xs;
-        color: var(--color-content-muted);
-    }
-    .rich-editor-ai-spinner {
-        @apply inline-block;
-        width: 0.875rem;
-        height: 0.875rem;
-        border-radius: 999px;
-        border: 2px solid var(--color-border-strong);
-        border-top-color: var(--color-content);
-        animation: rich-editor-ai-spin 0.7s linear infinite;
-    }
-    @keyframes rich-editor-ai-spin {
-        to { transform: rotate(360deg); }
-    }
 
     .transcript-pane {
         @apply flex flex-col;
         height: 100%;
-        min-height: 24rem;
         overflow: hidden;
     }
     .transcript-pane-header {
@@ -1982,8 +1978,6 @@
         @apply flex items-start gap-3 px-3 py-2 cursor-pointer text-sm select-none;
         border-bottom: 1px solid var(--color-border);
         transition: background-color 0.15s;
-        content-visibility: auto;
-        contain-intrinsic-size: auto 3.5rem;
     }
     .transcript-pane-row:hover {
         background-color: var(--color-row-hover);
@@ -2041,8 +2035,11 @@
         color: var(--color-primary-content);
     }
     .transcript-pane-row-text {
-        @apply text-sm leading-snug;
+        @apply text-sm leading-snug select-text;
         color: var(--color-content);
+    }
+    ::highlight(transcript-filter) {
+        background-color: color-mix(in oklab, var(--color-accent) 45%, transparent);
     }
     textarea.transcript-pane-row-edit {
         @apply block w-full select-text;

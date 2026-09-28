@@ -1,8 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
-import { generateJSON } from '@tiptap/core'
+import { createNodeFromContent, Extension, generateJSON } from '@tiptap/core'
 import type { Content, Editor, JSONContent } from '@tiptap/core'
+import { Fragment, Slice } from '@tiptap/pm/model'
+import type { Node as ProseMirrorNode } from '@tiptap/pm/model'
+import { Plugin, PluginKey, TextSelection } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
 import TaskList from '@tiptap/extension-task-list'
@@ -25,19 +29,31 @@ interface AIQuickAction {
     instruction: string
 }
 
+interface AIRange {
+    from: number
+    to: number
+}
+
+interface MarkdownSerializer {
+    serialize(content: ProseMirrorNode): string
+}
+
 interface MarkdownStorage {
     getMarkdown(): string
+    serializer: MarkdownSerializer
 }
 
 type MarkdownStorageTable = Record<string, MarkdownStorage | undefined>
 const HEADING_LEVELS: HeadingLevel[] = [1, 2, 3]
 const CODE_FENCE = '```'
 const TOOLBAR_COLLAPSE_WIDTH_PX = 640
+const SELECTION_GUARD_WINDOW_MS = 250
 const MESSAGE_INSTRUCTION_MISSING = 'Enter an instruction.'
-const MESSAGE_EMPTY_DOCUMENT = 'Nothing to rewrite yet.'
+const MESSAGE_EMPTY_DOCUMENT = 'There is nothing to rewrite yet.'
 const MESSAGE_EMPTY_REPLY = 'The AI did not return any text.'
 const MESSAGE_EMPTY_LAYOUT = 'The AI did not return anything.'
 const MESSAGE_DESCRIBE_FIRST = 'Describe the document first.'
+const MESSAGE_SELECTION_LOST = 'Select the text again.'
 const HTML_BLOCK_START = /^<(?:p|h[1-6]|ul|ol|li|blockquote|pre|table|hr|div|span|strong|em|code|br)\b/i
 
 const AI_QUICK_ACTIONS: AIQuickAction[] = [
@@ -73,6 +89,62 @@ const AI_QUICK_ACTIONS: AIQuickAction[] = [
     },
 ]
 
+const SelectionGuard = Extension.create({
+    name: 'selection_guard',
+
+    addProseMirrorPlugins() {
+        let armed_until = 0
+
+        return [
+            new Plugin({
+                key: new PluginKey('selection_guard'),
+                filterTransaction(transaction, state) {
+                    if (transaction.docChanged) {
+                        if (!transaction.selection.empty) {
+                            armed_until = performance.now() + SELECTION_GUARD_WINDOW_MS
+                        }
+
+                        return true
+                    }
+
+                    if (performance.now() > armed_until) return true
+                    if (!transaction.selectionSet) return true
+                    if (state.selection.empty || !transaction.selection.empty) return true
+                    if (transaction.getMeta('pointer') || transaction.getMeta('uiEvent')) return true
+                    if (transaction.scrolledIntoView) return true
+
+                    return false
+                },
+            }),
+        ]
+    },
+})
+
+const SelectionInactive = Extension.create({
+    name: 'selection_inactive',
+
+    addProseMirrorPlugins() {
+        const { editor } = this
+
+        return [
+            new Plugin({
+                key: new PluginKey('selection_inactive'),
+                props: {
+                    decorations(state) {
+                        const { from, to } = state.selection
+
+                        if (from === to || editor.isFocused) return null
+
+                        return DecorationSet.create(state.doc, [
+                            Decoration.inline(from, to, { class: 'selection-inactive' }),
+                        ])
+                    },
+                },
+            }),
+        ]
+    },
+})
+
 const props = defineProps<{
     modelValue: string
     placeholder?: string
@@ -91,8 +163,8 @@ const source_buffer = ref('')
 const ai_panel_open = ref(false)
 const ai_busy = ref(false)
 const ai_instruction = ref('')
-const ai_generate_description = ref('')
 const ai_selected_preview = ref('')
+const ai_range = ref<AIRange | null>(null)
 const ai_error = ref('')
 const has_selection = ref(false)
 const is_in_table = ref(false)
@@ -109,6 +181,15 @@ function markdown_of(editor_current: Editor): string {
     const storage = editor_current.storage as unknown as MarkdownStorageTable
 
     return storage['markdown']?.getMarkdown() ?? ''
+}
+
+function markdown_of_range(editor_current: Editor, range: AIRange): string {
+    const storage = editor_current.storage as unknown as MarkdownStorageTable
+    const doc = editor_current.state.doc
+    const partial = doc.copy(doc.slice(range.from, range.to, true).content)
+
+    return storage['markdown']?.serializer.serialize(partial).trim()
+        ?? doc.textBetween(range.from, range.to, '\n')
 }
 
 function heading_level_of(editor_current: Editor): string {
@@ -128,11 +209,28 @@ function refresh_state(editor_current: Editor) {
 
     heading_level_active.value = heading_level_of(editor_current)
 
-    if (!ai_panel_open.value) return
+    if (ai_panel_open.value) ai_range_set(editor_current)
+}
 
-    ai_selected_preview.value = to === from
-        ? ''
-        : editor_current.state.doc.textBetween(from, to, '\n')
+function ai_range_set(editor_current: Editor) {
+    const { from, to } = editor_current.state.selection
+
+    if (from === to) return
+
+    ai_range.value = { from, to }
+    ai_selected_preview.value = editor_current.state.doc.textBetween(from, to, '\n')
+}
+
+function ai_range_clamped(editor_current: Editor): AIRange | null {
+    const range = ai_range.value
+
+    if (!range) return null
+
+    const to = Math.min(range.to, editor_current.state.doc.content.size)
+
+    if (range.from >= to) return { from: 0, to: 0 }
+
+    return { from: range.from, to }
 }
 
 const editor = useEditor({
@@ -148,6 +246,8 @@ const editor = useEditor({
         TableHeader,
         TableCell,
         Markdown.configure({ html: true, transformPastedText: true, breaks: true }),
+        SelectionGuard,
+        SelectionInactive,
     ],
     editorProps: {
         clipboardTextSerializer: (slice) => clipboard_plain_text(slice.content),
@@ -178,6 +278,16 @@ const ai_button_title = computed(() => {
     if (has_selection.value) return 'Rewrite the selected text with AI'
 
     return 'Rewrite the whole document with AI'
+})
+
+const ai_input_placeholder = computed(() => props.ai_generate
+    ? 'Describe the document, e.g. weekly team meeting: decisions, who does what by when, problems to watch'
+    : "Custom instruction (e.g. 'rewrite as bullet points')")
+
+const ai_submit_label = computed(() => {
+    if (ai_busy.value) return 'Working…'
+
+    return props.ai_generate ? 'Generate' : 'Apply'
 })
 
 const ai_selected_count_text = computed(() => {
@@ -338,6 +448,7 @@ function table_insert() {
 
 function ai_open() {
     if (props.ai_generate) {
+        ai_instruction.value = ''
         ai_error.value = ''
         ai_panel_open.value = true
 
@@ -349,15 +460,13 @@ function ai_open() {
     if (!props.ai_rewrite) return
     if (!editor_current) return
 
-    const { from, to } = editor_current.state.selection
-
-    ai_selected_preview.value = from === to
-        ? ''
-        : editor_current.state.doc.textBetween(from, to, '\n')
-
+    ai_range.value = null
+    ai_selected_preview.value = ''
     ai_instruction.value = ''
     ai_error.value = ''
     ai_panel_open.value = true
+
+    ai_range_set(editor_current)
 }
 
 function ai_close() {
@@ -367,6 +476,7 @@ function ai_close() {
     ai_instruction.value = ''
     ai_error.value = ''
     ai_selected_preview.value = ''
+    ai_range.value = null
 }
 
 function ai_toggle() {
@@ -398,12 +508,14 @@ async function ai_rewrite_request(
     rewrite: AIRewriteHandler,
     text: string,
     instruction: string,
+    whole_document: boolean,
 ): Promise<string> {
     let accumulated = ''
 
     const args: AIRewriteArgs = {
         text,
         instruction,
+        whole_document,
         on_chunk: (chunk) => {
             accumulated += chunk
         },
@@ -412,6 +524,14 @@ async function ai_rewrite_request(
     const reply = await rewrite(args)
 
     return sanitize_llm_output(reply || accumulated)
+}
+
+function fragment_of(content: Content, editor_current: Editor): Fragment {
+    const node = createNodeFromContent(content, editor_current.schema, { slice: true })
+
+    if (node instanceof Fragment) return node
+
+    return node.type.name === 'doc' ? node.content : Fragment.from(node)
 }
 
 async function ai_content_build(raw: string, editor_current: Editor): Promise<Content> {
@@ -450,12 +570,19 @@ async function ai_apply(instruction: string) {
         return
     }
 
-    const { from, to } = editor_current.state.selection
-    const whole_document = from === to
+    const range = ai_range_clamped(editor_current)
 
-    const text_original = whole_document
-        ? markdown_of(editor_current)
-        : editor_current.state.doc.textBetween(from, to, '\n')
+    if (range && range.from === range.to) {
+        ai_error.value = MESSAGE_SELECTION_LOST
+
+        return
+    }
+
+    const whole_document = range === null
+
+    const text_original = range
+        ? markdown_of_range(editor_current, range)
+        : markdown_of(editor_current)
 
     if (text_original.trim().length === 0) {
         ai_error.value = MESSAGE_EMPTY_DOCUMENT
@@ -467,7 +594,12 @@ async function ai_apply(instruction: string) {
     ai_error.value = ''
 
     try {
-        const output_final = await ai_rewrite_request(rewrite, text_original, instruction_trimmed)
+        const output_final = await ai_rewrite_request(
+            rewrite,
+            text_original,
+            instruction_trimmed,
+            whole_document,
+        )
         const editor_after = editor.value
 
         if (!editor_after || output_final.length === 0) {
@@ -478,18 +610,21 @@ async function ai_apply(instruction: string) {
 
         const content = await ai_content_build(output_final, editor_after)
 
-        if (whole_document) {
+        if (!range) {
             editor_after.commands.setContent(content, { emitUpdate: true })
         } else {
-            editor_after
-                .chain()
-                .focus()
-                .setTextSelection({ from, to })
-                .deleteSelection()
-                .insertContent(content)
-                .run()
+            const slice = Slice.maxOpen(fragment_of(content, editor_after))
+            const tr = editor_after.state.tr.replaceRange(range.from, range.to, slice)
+            const to_inserted = tr.mapping.map(range.to)
 
-            ai_selected_preview.value = output_final
+            const selection_inserted = TextSelection.between(
+                tr.doc.resolve(range.from),
+                tr.doc.resolve(to_inserted),
+            )
+
+            tr.setSelection(selection_inserted)
+            editor_after.view.dispatch(tr.scrollIntoView())
+            editor_after.commands.focus()
         }
     } catch (error) {
         ai_error.value = error_text_extract(error)
@@ -513,7 +648,7 @@ async function ai_generate_apply() {
 
     if (!editor_current || !generate || ai_busy.value) return
 
-    const description = ai_generate_description.value.trim()
+    const description = ai_instruction.value.trim()
 
     if (description.length === 0) {
         ai_error.value = MESSAGE_DESCRIBE_FIRST
@@ -537,7 +672,7 @@ async function ai_generate_apply() {
 
         editor_current.commands.setContent(generated)
         ai_panel_open.value = false
-        ai_generate_description.value = ''
+        ai_instruction.value = ''
     } catch (error) {
         ai_error.value = error_text_extract(error)
     } finally {
@@ -550,6 +685,12 @@ function ai_quick_apply(action: AIQuickAction) {
 }
 
 function ai_custom_apply() {
+    if (props.ai_generate) {
+        void ai_generate_apply()
+
+        return
+    }
+
     void ai_apply(ai_instruction.value)
 }
 </script>
@@ -876,39 +1017,13 @@ function ai_custom_apply() {
             </button>
         </div>
 
-        <div v-if="!source_mode && ai_panel_open && ai_generate" class="rich-editor-ai">
-            <div v-if="ai_busy" class="rich-editor-ai-busy">
-                <span class="rich-editor-ai-spinner" />
-                <span class="rich-editor-ai-busy-label">Generating…</span>
-            </div>
-            <div class="rich-editor-ai-custom">
-                <input
-                    v-model="ai_generate_description"
-                    type="text"
-                    class="input rich-editor-ai-input"
-                    maxlength="500"
-                    placeholder="Describe the document, e.g. weekly team meeting: decisions, who does what by when, problems to watch"
-                    :disabled="ai_busy"
-                    @keydown.enter.prevent="ai_generate_apply"
-                />
-                <button
-                    type="button"
-                    class="btn-primary"
-                    :disabled="ai_busy || ai_generate_description.trim().length === 0"
-                    @mousedown.prevent
-                    @click="ai_generate_apply"
-                >
-                    {{ ai_busy ? 'Generating…' : 'Generate' }}
-                </button>
-            </div>
-            <p v-if="ai_error" class="rich-editor-ai-error">{{ ai_error }}</p>
-        </div>
-
-        <div v-else-if="!source_mode && ai_panel_open" class="rich-editor-ai">
+        <div v-if="!source_mode && ai_panel_open" class="rich-editor-ai">
             <div class="rich-editor-ai-header">
-                <span class="rich-editor-ai-title">AI rewrite</span>
-                <span class="rich-editor-ai-meta opacity-60">·</span>
-                <span class="rich-editor-ai-meta">{{ ai_selected_count_text }}</span>
+                <span class="rich-editor-ai-title">{{ ai_generate ? 'AI layout' : 'AI rewrite' }}</span>
+                <template v-if="!ai_generate">
+                    <span class="rich-editor-ai-meta opacity-60">·</span>
+                    <span class="rich-editor-ai-meta">{{ ai_selected_count_text }}</span>
+                </template>
                 <span class="flex-1" />
                 <button
                     type="button"
@@ -932,7 +1047,7 @@ function ai_custom_apply() {
                     </svg>
                 </button>
             </div>
-            <div class="rich-editor-ai-actions">
+            <div v-if="!ai_generate" class="rich-editor-ai-actions">
                 <button
                     v-for="action in AI_QUICK_ACTIONS"
                     :key="action.id"
@@ -950,7 +1065,8 @@ function ai_custom_apply() {
                     v-model="ai_instruction"
                     type="text"
                     class="input rich-editor-ai-input"
-                    placeholder="Custom instruction (e.g. 'rewrite as bullet points')"
+                    maxlength="500"
+                    :placeholder="ai_input_placeholder"
                     :disabled="ai_busy"
                     @keydown.enter.prevent="ai_custom_apply"
                 />
@@ -961,7 +1077,7 @@ function ai_custom_apply() {
                     @mousedown.prevent
                     @click="ai_custom_apply"
                 >
-                    {{ ai_busy ? 'Working…' : 'Apply' }}
+                    {{ ai_submit_label }}
                 </button>
             </div>
             <p v-if="ai_error" class="rich-editor-ai-error">{{ ai_error }}</p>

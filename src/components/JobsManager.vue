@@ -17,6 +17,14 @@ import type { RowMenuItem } from './RowMenu.vue'
 import type { JobListing, JobMeta, JobSearchHit, JobsViewChoice } from '../types'
 
 
+type SortKey = 'date' | 'duration' | 'people' | 'status' | 'title'
+
+interface SortColumn {
+    key: SortKey
+    label: string
+    descending_first: boolean
+}
+
 const SEARCH_DEBOUNCE_MS = 250
 const SEARCH_QUERY_LENGTH_MIN = 2
 const MILLISECONDS_PER_SECOND = 1000
@@ -25,6 +33,14 @@ const MILLISECONDS_PER_DAY = 24 * 3600 * MILLISECONDS_PER_SECOND
 const ROW_MENU_ITEMS: RowMenuItem[] = [
     { id: 'rename', label: 'Rename', icon: 'edit' },
     { id: 'delete', label: 'Delete', icon: 'delete', danger: true },
+]
+
+const SORT_COLUMNS: SortColumn[] = [
+    { key: 'title', label: 'Title', descending_first: false },
+    { key: 'people', label: 'Participants', descending_first: false },
+    { key: 'date', label: 'Date', descending_first: true },
+    { key: 'duration', label: 'Duration', descending_first: true },
+    { key: 'status', label: 'Status', descending_first: false },
 ]
 
 const { confirm: dialog_confirm } = use_dialog()
@@ -42,6 +58,8 @@ function jobs_view_set(view: JobsViewChoice) {
     void settings_update({ jobs_view: view })
 }
 const search_query = ref<string>('')
+const sort_key = ref<SortKey | null>(null)
+const sort_descending = ref<boolean>(false)
 const search_hits = ref<Map<string, JobSearchHit>>(new Map())
 const rename_target = ref<JobMeta | null>(null)
 const rename_input_value = ref<string>('')
@@ -113,12 +131,57 @@ const jobs_filtered = computed<JobListing[]>(() => {
         ? jobs.value.slice()
         : jobs.value.filter((job) => job_matches(job, needle))
 
-    return base.sort((left, right) => {
+    return base.sort(sort_compare)
+})
+
+function sort_compare(left: JobListing, right: JobListing): number {
+    const key = sort_key.value
+    const by_newest = right.created_at_unix - left.created_at_unix
+
+    if (key === null) {
         const by_favourite = Number(right.favourite) - Number(left.favourite)
 
-        return by_favourite !== 0 ? by_favourite : right.created_at_unix - left.created_at_unix
-    })
-})
+        return by_favourite !== 0 ? by_favourite : by_newest
+    }
+
+    const value_left = sort_value_of(left, key)
+    const value_right = sort_value_of(right, key)
+
+    const order = typeof value_left === 'number' && typeof value_right === 'number'
+        ? value_left - value_right
+        : String(value_left).localeCompare(String(value_right))
+
+    if (order === 0) return by_newest
+
+    return sort_descending.value ? -order : order
+}
+
+function sort_value_of(job: JobListing, key: SortKey): number | string {
+    switch (key) {
+        case 'date': return job.created_at_unix
+        case 'duration': return job.duration_seconds ?? -1
+        case 'people': return (people_text_for(job) ?? '').toLowerCase()
+        case 'status': return job_status(job).text
+        case 'title': return title_for(job).toLowerCase()
+    }
+}
+
+function sort_set(column: SortColumn) {
+    if (sort_key.value === column.key) {
+        sort_descending.value = !sort_descending.value
+
+        return
+    }
+
+    sort_key.value = column.key
+    sort_descending.value = column.descending_first
+}
+
+function sort_aria(column: SortColumn): 'ascending' | 'descending' | 'none' {
+    if (sort_key.value !== column.key) return 'none'
+
+    return sort_descending.value ? 'descending' : 'ascending'
+}
 
 function search_snippet_for(job: JobMeta): string | null {
     const hit = search_hits.value.get(job.id)
@@ -136,7 +199,12 @@ function people_text_for(job: JobMeta): string | null {
 
     const listed = names.length > 0 ? names : job.attendees
 
-    return listed.length > 0 ? listed.join(', ') : null
+    if (listed.length === 0) return null
+
+    return listed
+        .slice()
+        .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: 'base' }))
+        .join(', ')
 }
 
 async function favourite_toggle(job: JobMeta) {
@@ -341,11 +409,23 @@ async function rename_save() {
             <table class="recording-table">
                 <thead>
                     <tr>
-                        <th>Title</th>
-                        <th>Participants</th>
-                        <th>Date</th>
-                        <th>Duration</th>
-                        <th>Status</th>
+                        <th
+                            v-for="column in SORT_COLUMNS"
+                            :key="column.key"
+                            :aria-sort="sort_aria(column)"
+                        >
+                            <button
+                                type="button"
+                                class="recording-table-sort"
+                                :data-active="sort_key === column.key ? 'true' : 'false'"
+                                @click="sort_set(column)"
+                            >
+                                {{ column.label }}
+                                <span class="recording-table-sort-mark" aria-hidden="true">
+                                    {{ sort_key === column.key ? (sort_descending ? '↓' : '↑') : '' }}
+                                </span>
+                            </button>
+                        </th>
                         <th><span class="sr-only">Actions</span></th>
                     </tr>
                 </thead>

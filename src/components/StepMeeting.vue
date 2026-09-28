@@ -18,7 +18,7 @@ const AUTOSAVE_DEBOUNCE_MS = 800
 const PICKER_HINT_MENTIONED = 'Tick people who came up in conversation but were not there. '
     + 'The AI will recognise them by name and role.'
 
-const PICKER_HINT_PRESENT = 'Tick everyone who was there. The AI uses their role and '
+const PICKER_HINT_PRESENT = 'Tick each person who was there. The AI uses their role and '
     + 'description to tell who is speaking.'
 
 const {
@@ -246,7 +246,7 @@ async function next() {
                         </option>
                     </select>
                     <p v-if="templates.length === 0" class="meta">
-                        No templates yet.
+                        There are no templates yet.
                         <button type="button" class="underline" @click="view_set('templates')">
                             Add one
                         </button>
@@ -287,7 +287,7 @@ async function next() {
                     </span>
                 </div>
                 <p v-if="attendees_legacy.length > 0" class="meta">
-                    Names from before People existed: {{ attendees_legacy.join(', ') }}
+                    These names are from before People existed: {{ attendees_legacy.join(', ') }}
                 </p>
             </div>
 

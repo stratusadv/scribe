@@ -138,7 +138,7 @@ async function save_click(person: Person) {
 
 async function delete_click(person: Person) {
     const ok = await dialog_confirm(
-        `Remove ${person_name_full(person)} from People? Meetings they were added to keep `
+        `Remove ${person_name_full(person)} from People? The meetings they were added to keep `
             + 'their notes.',
         { title: 'Remove person', kind: 'warning' },
     )
@@ -175,7 +175,7 @@ use_shortcuts({
             <div>
                 <h2 class="!mb-1 flex items-center">
                     People
-                    <InfoHint text="The people who turn up in your meetings. Add each one once with their role and a short description, then pick them from a list on the Meeting step so the AI knows who was there and who does what." />
+                    <InfoHint text="These are the people who turn up in your meetings. Add each one once with their role and a short description, then pick them from a list on the Meeting step so the AI knows who was there and who does what." />
                 </h2>
             </div>
             <div class="page-header-actions">
@@ -211,13 +211,13 @@ use_shortcuts({
                     />
                 </li>
             </ul>
-            <p v-else class="meta">No people yet. Click Add person to add the first one.</p>
+            <p v-else class="meta">There are no people yet. Click Add person to add the first one.</p>
 
             <header class="page-header section-next">
                 <div>
                     <h2 class="!mb-1 flex items-center">
                         Groups
-                        <InfoHint text="A group is a set of people you often add together, such as the managers or the floor staff. On the Meeting step, picking the group ticks everyone in it at once." />
+                        <InfoHint text="A group is a set of people you often add together, such as the managers or the floor staff. The Meeting step ticks each person in the group when the group is picked." />
                     </h2>
                 </div>
             </header>
@@ -245,7 +245,7 @@ use_shortcuts({
                 </li>
             </ul>
             <p v-else class="meta">
-                No groups yet. Click Add group to put people who are usually together in one.
+                There are no groups yet. Click Add group to put people who are usually together in one.
             </p>
         </div>
 

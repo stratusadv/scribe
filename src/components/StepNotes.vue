@@ -42,7 +42,7 @@ interface ExportFileDialog {
 const AUTOSAVE_DEBOUNCE_MS = 1000
 const EVENT_NOTES_CHUNK = 'notes_generate_chunk'
 const SLUG_CHARS_MAX = 80
-const MESSAGE_NO_JOB = 'No active job. Transcribe a file first to create one.'
+const MESSAGE_NO_JOB = 'There is no active job. Transcribe a file first to create one.'
 const MESSAGE_KEY_MISSING = 'Add your API key under Settings first.'
 
 const EXPORT_FILE_DIALOGS: Record<ExportFileFormat, ExportFileDialog> = {
@@ -266,7 +266,7 @@ async function generate_confirm_overwrite(): Promise<boolean> {
     if (!notes_present.value) return true
 
     return await dialog_confirm(
-        'Generating will overwrite the current notes. Continue?',
+        'This will overwrite the current notes. Continue?',
         { title: 'Overwrite notes', kind: 'warning' },
     )
 }
@@ -421,7 +421,7 @@ async function export_target_pick(format: ExportFileFormat): Promise<string | nu
 
 async function export_open_offer(path_saved: string) {
     const open_wanted = await dialog_confirm(
-        `Notes exported to ${path_saved}. Open the file now?`,
+        `The notes were exported to ${path_saved}. Open the file now?`,
         { title: 'Notes exported', kind: 'info' },
     )
 
@@ -433,7 +433,7 @@ async function export_open_offer(path_saved: string) {
         console.warn('openPath failed', error)
 
         await dialog_message(
-            `Saved, but could not open the file automatically. You can open it from ${path_saved}.`,
+            `The notes were saved, but the file could not be opened automatically. You can open it from ${path_saved}.`,
             { title: 'Notes exported', kind: 'info' },
         )
     }
@@ -491,7 +491,7 @@ async function ai_rewrite_handler(args: AIRewriteArgs): Promise<string> {
             endpoint_id,
             args.text,
             args.instruction,
-            template_id_selected.value,
+            args.whole_document ? template_id_selected.value : null,
         )
     } finally {
         unlisten()

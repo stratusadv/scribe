@@ -21,6 +21,8 @@ const ROWS_RENDER_STEP = 60
 const ROWS_RENDER_THRESHOLD_PX = 200
 const COPIED_FLASH_MS = 1500
 const BLOB_PREFIX = 'blob:'
+const HIGHLIGHT_NAME = 'transcript-filter'
+const REGEX_ESCAPE = /[.*+?^${}()|[\]\\]/g
 const { job_id_current, transcript_segments_text_set } = use_pipeline()
 
 const props = defineProps<{
@@ -53,12 +55,20 @@ const rows = computed<DisplayRow[]>(() => {
         .filter((row) => row.text.length > 0)
 })
 
+const filter_regex = computed<RegExp | null>(() => {
+    const needle = filter_text.value.trim()
+
+    if (needle.length === 0) return null
+
+    return new RegExp(needle.replace(REGEX_ESCAPE, '\\$&'), 'i')
+})
+
 const rows_filtered = computed<DisplayRow[]>(() => {
-    const needle = filter_text.value.trim().toLowerCase()
+    const regex = filter_regex.value
 
-    if (needle.length === 0) return rows.value
+    if (!regex) return rows.value
 
-    return rows.value.filter((row) => row.text.toLowerCase().includes(needle))
+    return rows.value.filter((row) => regex.test(row.text))
 })
 
 const rows_rendered = computed<DisplayRow[]>(
@@ -76,6 +86,38 @@ watch(rows_rendered, async () => {
 
     rows_render_grow()
 })
+
+watch([rows_rendered, filter_regex, index_editing], highlights_apply, { flush: 'post' })
+
+function highlights_apply() {
+    const regex = filter_regex.value
+    const container = list_ref.value
+
+    if (!regex || !container) {
+        CSS.highlights.delete(HIGHLIGHT_NAME)
+
+        return
+    }
+
+    const matcher = new RegExp(regex.source, 'gi')
+    const ranges: Range[] = []
+
+    for (const element of container.querySelectorAll('.transcript-pane-row-text')) {
+        const node = element.firstChild
+
+        if (!(node instanceof Text)) continue
+
+        for (const match of node.data.matchAll(matcher)) {
+            const range = new Range()
+
+            range.setStart(node, match.index)
+            range.setEnd(node, match.index + match[0].length)
+            ranges.push(range)
+        }
+    }
+
+    CSS.highlights.set(HIGHLIGHT_NAME, new Highlight(...ranges))
+}
 
 function rows_render_grow() {
     const container = list_ref.value
@@ -283,6 +325,7 @@ watch(() => job_id_current.value, () => {
 onUnmounted(() => {
     audio_pause_if_playing()
     audio_src_release()
+    CSS.highlights.delete(HIGHLIGHT_NAME)
 })
 </script>
 
@@ -308,7 +351,7 @@ onUnmounted(() => {
         </div>
 
         <div v-if="rows.length === 0" class="meta px-3 py-2">
-            No transcript yet.
+            There is no transcript yet.
         </div>
         <ul
             v-else-if="audio_checked"
