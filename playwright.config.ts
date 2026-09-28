@@ -19,9 +19,9 @@ export default defineConfig({
         },
     ],
     webServer: {
-        command: "bun run dev",
+        command: "bun run dev --host 127.0.0.1",
         url: URL_DEV,
         reuseExistingServer: !process.env.CI,
-        timeout: 60_000,
+        timeout: 120_000,
     },
 })

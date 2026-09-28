@@ -194,12 +194,12 @@ fn recording_append_blocking(slot: &RecordingSlot, bytes: &[u8]) -> AppResult<()
         )));
     }
 
-    for pair in bytes.chunks_exact(PCM16_SAMPLE_BYTES as usize) {
-        let &[low, high] = pair else { continue };
+    let (pairs, _) = bytes.as_chunks::<{ PCM16_SAMPLE_BYTES as usize }>();
 
+    for pair in pairs {
         active
             .writer
-            .write_sample(i16::from_le_bytes([low, high]))
+            .write_sample(i16::from_le_bytes(*pair))
             .map_err(|error| AppError::Audio(format!("recording write: {error}")))?;
     }
 

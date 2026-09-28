@@ -120,9 +120,10 @@ fn waveform_peaks_scan(
         data.read_exact(block_wanted)
             .map_err(|error| AppError::Audio(format!("wav read: {error}")))?;
 
-        for pair in block_wanted.chunks_exact(PCM16_SAMPLE_BYTES as usize) {
-            let &[low, high] = pair else { continue };
-            let magnitude = i16::from_le_bytes([low, high]).unsigned_abs();
+        let (pairs, _) = block_wanted.as_chunks::<{ PCM16_SAMPLE_BYTES as usize }>();
+
+        for pair in pairs {
+            let magnitude = i16::from_le_bytes(*pair).unsigned_abs();
 
             if magnitude > bucket_peak {
                 bucket_peak = magnitude;
