@@ -46,7 +46,7 @@ function save_click() {
             <label class="label">Group name</label>
             <input
                 v-model="name"
-                type="text"
+                type="search"
                 class="input"
                 maxlength="120"
                 placeholder="e.g. Managers, Developers, Floor staff"

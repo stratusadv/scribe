@@ -25,6 +25,7 @@ interface SortColumn {
     descending_first: boolean
 }
 
+const DURATION_TEXT_NONE = '-:--'
 const SEARCH_DEBOUNCE_MS = 250
 const SEARCH_QUERY_LENGTH_MIN = 2
 const MILLISECONDS_PER_SECOND = 1000
@@ -446,7 +447,7 @@ async function rename_save() {
                             {{ date_format(job.created_at_unix) }}
                         </td>
                         <td class="recording-table-muted recording-table-nowrap">
-                            {{ job_duration_text(job) ?? '' }}
+                            {{ job_duration_text(job) ?? DURATION_TEXT_NONE }}
                         </td>
                         <td class="recording-table-nowrap">
                             <span
@@ -543,7 +544,7 @@ async function rename_save() {
                         <input
                             ref="rename_input_ref"
                             v-model="rename_input_value"
-                            type="text"
+                            type="search"
                             class="input"
                             :disabled="rename_busy"
                             @keydown.enter.prevent="rename_save"

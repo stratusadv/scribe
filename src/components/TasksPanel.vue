@@ -145,6 +145,7 @@ function task_action_available(task: Task): boolean {
                         <span
                             v-if="task.status === 'failed' && task.error_message"
                             class="sidebar-task-error"
+                            :title="task.error_message"
                         >
                             {{ task.error_message }}
                         </span>

@@ -1326,6 +1326,10 @@
     .recording-tile-wave rect {
         fill: currentColor;
     }
+    .recording-tile-glyph {
+        padding: 0 0.75rem;
+        opacity: 0.55;
+    }
     .recording-tile-tools {
         @apply absolute flex items-center justify-between;
         inset: 0.375rem 0.375rem auto;

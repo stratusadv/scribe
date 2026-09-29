@@ -243,7 +243,7 @@ test('the row menu renames a recording', async ({ page }) => {
     await row_menu_pick(page, RECORDING_UNTITLED, 'Rename')
 
     const rename = dialog(page, 'Rename recording')
-    const input = rename.getByRole('textbox')
+    const input = rename.getByRole('searchbox')
 
     await expect(input).toHaveValue(RECORDING_UNTITLED)
 
@@ -264,7 +264,7 @@ test('the rename dialog closes without saving on Cancel', async ({ page }) => {
 
     const rename = dialog(page, 'Rename recording')
 
-    await rename.getByRole('textbox').fill('Dropped')
+    await rename.getByRole('searchbox').fill('Dropped')
     await rename.getByRole('button', { name: 'Cancel' }).click()
 
     await expect(rename).toBeHidden()

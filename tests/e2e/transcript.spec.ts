@@ -191,7 +191,7 @@ test('Escape abandons a line edit', async ({ page }) => {
 test('the correction bar applies the returned corrections', async ({ page }) => {
     await transcript_step_open(page)
 
-    const instruction = page.getByRole('textbox', { name: 'Correction instruction' })
+    const instruction = page.getByRole('searchbox', { name: 'Correction instruction' })
     const apply = page.getByRole('button', { name: 'Apply' })
 
     await expect(apply).toBeDisabled()
@@ -208,7 +208,18 @@ test('the correction bar applies the returned corrections', async ({ page }) => 
         .toHaveText(LINE_SECOND.toUpperCase())
     await expect(corrected).toHaveAttribute('data-highlighted', 'true')
     await expect(transcript_rows(page).first()).toHaveAttribute('data-highlighted', 'false')
+    await expect(instruction).toHaveValue('record')
+
+    await instruction.fill('')
+
     await expect(instruction).toHaveValue('')
+    await expect(apply).toBeDisabled()
+
+    await page.getByRole('button', { name: 'Undo' }).click()
+
+    await expect(corrected.locator('.transcript-pane-row-text')).toHaveText(LINE_SECOND)
+    await expect(corrected).toHaveAttribute('data-highlighted', 'false')
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(0)
 })
 
 test('Next moves the step bar to Meeting', async ({ page }) => {

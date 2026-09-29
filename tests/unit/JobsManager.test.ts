@@ -293,7 +293,7 @@ describe('JobsManager cells', () => {
 
         expect(rows[0]?.findAll('td')[3]?.text()).toBe('1:40')
         expect(rows[0]?.get('.recording-tile-status').text()).toBe('Notes ready')
-        expect(rows[2]?.findAll('td')[3]?.text()).toBe('')
+        expect(rows[2]?.findAll('td')[3]?.text()).toBe('-:--')
         expect(rows[2]?.get('.recording-tile-status').text()).toBe('Not transcribed')
     })
 

@@ -110,7 +110,7 @@ async function transcribe_one(path: string) {
             async runner() {
                 if (!endpoint_id) throw new Error(MESSAGE_KEY_MISSING)
 
-                return await ipc.transcription_remote(path, endpoint_id, null)
+                return await ipc.transcription_remote(path, endpoint_id, null, true)
             },
             on_success(result, task) {
                 task.job_id = result.job_id

@@ -56,6 +56,7 @@ const CHUNK_DELAY_MS = 45
 const SEGMENT_DELAY_MS = 260
 const SECONDS_PER_LINE = 18
 const DURATION_SECONDS_SAMPLE = 144
+const SOURCE_PATH_IMPORTED = '(imported transcript)'
 const WAVEFORM_BAR_COUNT_MAX = 2000
 const SNIPPET_CHARS_BEFORE = 40
 const SNIPPET_CHARS_AFTER = 80
@@ -467,12 +468,16 @@ const commands = Object.freeze<Record<string, CommandHandler>>({
     },
 
     jobs_list() {
-        return store.jobs.map((job) => ({
-            ...job,
-            has_transcript: store.transcripts.has(job.id),
-            has_notes: store.notes_markdown.has(job.id),
-            duration_seconds: DURATION_SECONDS_SAMPLE,
-        }))
+        return store.jobs.map((job) => {
+            const imported = job.source_path === SOURCE_PATH_IMPORTED
+
+            return {
+                ...job,
+                has_transcript: store.transcripts.has(job.id),
+                has_notes: store.notes_markdown.has(job.id),
+                duration_seconds: imported ? null : DURATION_SECONDS_SAMPLE,
+            }
+        })
     },
     jobs_search(call) {
         const hits = jobs_search_mock(call['query'] as string)
@@ -489,7 +494,12 @@ const commands = Object.freeze<Record<string, CommandHandler>>({
 
         if (!job) throw new Error('job not found')
 
-        Object.assign(job, call['patch'] as JobMetaPatch)
+        const patch = { ...(call['patch'] as JobMetaPatch) }
+
+        if (patch.title !== undefined) patch.title = text_clean(patch.title)
+        if (patch.project !== undefined) patch.project = text_clean(patch.project)
+
+        Object.assign(job, patch)
 
         return { ...job }
     },
@@ -508,6 +518,10 @@ const commands = Object.freeze<Record<string, CommandHandler>>({
         store.transcripts.set(call['job_id'] as string, call['transcript'] as Transcript)
     },
     job_waveform_get(call) {
+        const job = store.jobs.find((candidate) => candidate.id === call['job_id'])
+
+        if (job?.source_path === SOURCE_PATH_IMPORTED) return null
+
         const waveform = waveform_build(call['bar_count'] as number)
 
         assert(waveform.peaks.length <= WAVEFORM_BAR_COUNT_MAX, 'the waveform has too many bars')
@@ -526,7 +540,7 @@ const commands = Object.freeze<Record<string, CommandHandler>>({
 
         await transcription_stream_emit(stream_id, transcript)
 
-        const result: TranscriptionResult = { job_id: JOB_ID_SAMPLE, transcript }
+        const result: TranscriptionResult = { job_id: JOB_ID_SAMPLE, transcript, cached: false }
 
         return result
     },
@@ -537,6 +551,7 @@ const commands = Object.freeze<Record<string, CommandHandler>>({
         const result: TranscriptionResult = {
             job_id: JOB_ID_SAMPLE,
             transcript: transcript_build(lines),
+            cached: false,
         }
 
         return result
@@ -754,6 +769,12 @@ function transcript_build(lines: string[]): Transcript {
     }))
 
     return { text: lines.join(' '), segments }
+}
+
+function text_clean(text: string | null): string | null {
+    const trimmed = text?.trim() ?? ''
+
+    return trimmed.length > 0 ? trimmed : null
 }
 
 function waveform_build(bar_count: number): Waveform {

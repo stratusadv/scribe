@@ -102,13 +102,33 @@ describe('RecordingTile', () => {
         expect(bars[1]?.attributes('y')).toBe('25')
     })
 
-    it('renders an empty one-bar-wide view box without a waveform', async () => {
+    it('draws a text glyph instead of a wave when the job has no audio', async () => {
         const wrapper = mount_tile(job_listing_build())
 
         await flushPromises()
 
-        expect(wrapper.findAll('rect')).toHaveLength(0)
-        expect(wrapper.get('svg').attributes('viewBox')).toBe('0 0 3 100')
+        const glyph = wrapper.get('.recording-tile-glyph')
+        const words = glyph.findAll('rect')
+        const rows = new Set(words.map((word) => word.attributes('y')))
+
+        expect(glyph.attributes('viewBox')).toBe('0 0 100 100')
+        expect(words.length).toBeGreaterThan(5)
+        expect(rows.size).toBe(5)
+        expect(words.every((word) => word.attributes('height') === '8')).toBe(true)
+    })
+
+    it('draws the same glyph for the same job and a different one for another', async () => {
+        const first = mount_tile(job_listing_build({ id: 'job-a' }))
+        const same = mount_tile(job_listing_build({ id: 'job-a' }))
+        const other = mount_tile(job_listing_build({ id: 'job-b' }))
+
+        await flushPromises()
+
+        const shape = (wrapper: VueWrapper) =>
+            wrapper.findAll('rect').map((word) => word.attributes('width')).join(',')
+
+        expect(shape(first)).toBe(shape(same))
+        expect(shape(first)).not.toBe(shape(other))
     })
 
     it('warns and keeps rendering when the waveform fails', async () => {

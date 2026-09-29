@@ -25,11 +25,17 @@ async function invoke_void(command: string, call?: InvokeArgs): Promise<void> {
 }
 
 export const ipc = Object.freeze({
-    transcription_remote(audio_path: string, endpoint_id: string, stream_id: string | null) {
+    transcription_remote(
+        audio_path: string,
+        endpoint_id: string,
+        stream_id: string | null,
+        transcript_reuse: boolean,
+    ) {
         return invoke<TranscriptionResult>('transcription_remote', {
             audio_path,
             endpoint_id,
             stream_id,
+            transcript_reuse,
         })
     },
     transcript_import(title: string, transcript_text: string) {

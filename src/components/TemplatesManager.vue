@@ -159,7 +159,7 @@ use_shortcuts({
                 <label class="label">Name</label>
                 <input
                     v-model="edit.template.name"
-                    type="text"
+                    type="search"
                     class="input"
                     maxlength="120"
                     placeholder="e.g. Meeting notes"
@@ -170,7 +170,7 @@ use_shortcuts({
                 <label class="label">Description</label>
                 <input
                     v-model="edit.template.description"
-                    type="text"
+                    type="search"
                     class="input"
                     maxlength="240"
                     placeholder="One line on what this template is for"

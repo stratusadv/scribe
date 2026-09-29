@@ -12,6 +12,25 @@ const WAVEFORM_BAR_HEIGHT_MIN = 4
 const WAVEFORM_BAR_PITCH = 3
 const WAVEFORM_BAR_WIDTH = 2
 const WAVEFORM_HEIGHT = 100
+const GLYPH_WIDTH = 100
+const GLYPH_LINE_COUNT = 5
+const GLYPH_LINE_HEIGHT = 8
+const GLYPH_LINE_PITCH = 18
+const GLYPH_LINE_TOP = 6
+const GLYPH_LINE_LAST_FILL_MIN = 0.3
+const GLYPH_LINE_LAST_FILL_SPAN = 0.4
+const GLYPH_WORD_GAP = 3
+const GLYPH_WORD_WIDTH_MIN = 6
+const GLYPH_WORD_WIDTH_MAX = 22
+const FNV_OFFSET = 2166136261
+const FNV_PRIME = 16777619
+const UINT32_SPAN = 4294967296
+
+interface GlyphWord {
+    x: number
+    y: number
+    width: number
+}
 
 const props = defineProps<{
     job: JobListing
@@ -30,6 +49,7 @@ const emit = defineEmits<{
 
 const { waveform_load } = use_jobs()
 const waveform = ref<Waveform | null>(null)
+const audio_missing = ref(false)
 
 const wave_bars = computed(() =>
     (waveform.value?.peaks ?? []).map((peak, index) => ({
@@ -42,13 +62,62 @@ const wave_view_box = computed(
     () => `0 0 ${Math.max(1, wave_bars.value.length) * WAVEFORM_BAR_PITCH} ${WAVEFORM_HEIGHT}`,
 )
 
+const glyph_words = computed(() => glyph_words_build(hash_fnv(props.job.id)))
 const duration_text = computed(() => job_duration_text(props.job))
 const status = computed(() => job_status(props.job))
 
 
+function hash_fnv(text: string): number {
+    let hash = FNV_OFFSET
+
+    for (const char of text) {
+        hash ^= char.codePointAt(0) ?? 0
+        hash = Math.imul(hash, FNV_PRIME) >>> 0
+    }
+
+    return hash
+}
+
+function glyph_words_build(seed: number): GlyphWord[] {
+    let state = seed || 1
+
+    const random = () => {
+        state ^= state << 13
+        state >>>= 0
+        state ^= state >>> 17
+        state ^= state << 5
+        state >>>= 0
+
+        return state / UINT32_SPAN
+    }
+
+    const words: GlyphWord[] = []
+
+    for (let line = 0; line < GLYPH_LINE_COUNT; line += 1) {
+        const last = line === GLYPH_LINE_COUNT - 1
+        const y = GLYPH_LINE_TOP + line * GLYPH_LINE_PITCH
+        const fill = last ? GLYPH_LINE_LAST_FILL_MIN + random() * GLYPH_LINE_LAST_FILL_SPAN : 1
+        const width_line = GLYPH_WIDTH * fill
+        let x = 0
+
+        while (x < width_line) {
+            const width_span = GLYPH_WORD_WIDTH_MAX - GLYPH_WORD_WIDTH_MIN
+            const width = Math.min(GLYPH_WORD_WIDTH_MIN + random() * width_span, width_line - x)
+
+            if (width < GLYPH_WORD_WIDTH_MIN / 2) break
+
+            words.push({ x, y, width })
+            x += width + GLYPH_WORD_GAP
+        }
+    }
+
+    return words
+}
+
 onMounted(async () => {
     try {
         waveform.value = await waveform_load(props.job.id)
+        audio_missing.value = waveform.value === null
     } catch (error) {
         console.warn('[recordings] waveform unavailable', props.job.id, error)
     }
@@ -64,6 +133,24 @@ onMounted(async () => {
     >
         <div class="recording-tile-band">
             <svg
+                v-if="audio_missing"
+                class="recording-tile-wave recording-tile-glyph"
+                :viewBox="`0 0 ${GLYPH_WIDTH} ${WAVEFORM_HEIGHT}`"
+                preserveAspectRatio="none"
+                aria-hidden="true"
+            >
+                <rect
+                    v-for="word in glyph_words"
+                    :key="`${word.x}-${word.y}`"
+                    :x="word.x"
+                    :y="word.y"
+                    :width="word.width"
+                    :height="GLYPH_LINE_HEIGHT"
+                    rx="2"
+                />
+            </svg>
+            <svg
+                v-else
                 class="recording-tile-wave"
                 :viewBox="wave_view_box"
                 preserveAspectRatio="none"

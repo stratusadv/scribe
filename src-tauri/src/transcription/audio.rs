@@ -86,6 +86,7 @@ pub(crate) fn waveform_compute(audio_path: &Path, bar_count: u32) -> AppResult<W
     Ok(Waveform { peaks, duration_seconds })
 }
 
+
 fn waveform_peaks_scan(
     mut data: impl Read,
     samples_total: u64,

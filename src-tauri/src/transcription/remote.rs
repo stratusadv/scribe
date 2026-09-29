@@ -36,11 +36,13 @@ use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tauri::Emitter;
 
-const REQUEST_TIMEOUT_SECONDS: u64 = 90;
+const REQUEST_TIMEOUT_SECONDS: u64 = 300;
 const CONNECT_TIMEOUT_SECONDS: u64 = 15;
-const CHUNK_CONCURRENCY_MAX: u32 = 8;
+const CHUNK_CONCURRENCY_MAX: u32 = 4;
 const CHUNK_COUNT_MAX: u32 = 4096;
 const CHUNK_SECONDS_MIN: u32 = 2;
+const SENTENCES_PER_CHUNK_MAX: u32 = 512;
+const SENTENCE_ENDS: &[char] = &['.', '?', '!'];
 const CANCEL_POLL_INTERVAL_MS: u64 = 250;
 const MILLISECONDS_PER_SECOND: u64 = 1000;
 const SILENCE_PEAK_MAX: f32 = 0.002;
@@ -138,7 +140,7 @@ pub(super) async fn transcribe_audio_file(
         .map_or_else(|| FILE_NAME_DEFAULT.to_owned(), |name| name.to_string_lossy().into_owned());
 
     let file_bytes = tokio::fs::read(audio_path).await?;
-    let parsed = upload_chunk(upload, file_bytes, file_name).await?;
+    let parsed = upload_chunk(upload, &file_bytes, &file_name).await?;
 
     let segments: Vec<TranscriptSegment> = parsed
         .segments
@@ -231,7 +233,7 @@ async fn transcribe_chunked(
         chunk_payloads,
         chunk_indices_silent,
         upload,
-        f64::from(chunk_seconds),
+        chunk_seconds,
         progress,
         cancel_flag.as_deref(),
     )
@@ -244,19 +246,91 @@ async fn transcribe_chunked(
     Ok(transcribe_chunked_assemble(completed?, f64::from(chunk_seconds)))
 }
 
+struct ChunkCollection {
+    chunk_count: u32,
+    chunk_seconds: u32,
+    completed: Vec<(u32, APIResponse)>,
+    completion_count: u32,
+    index_next: u32,
+    pending: BTreeMap<u32, APIResponse>,
+}
+
+impl ChunkCollection {
+    fn new(chunk_count: u32, chunk_seconds: u32, chunk_indices_silent: &[u32]) -> Self {
+        debug_assert!(chunk_seconds > 0);
+        debug_assert!(chunk_count <= CHUNK_COUNT_MAX);
+
+        Self {
+            chunk_count,
+            chunk_seconds,
+            completed: Vec::with_capacity(chunk_count as usize),
+            completion_count: u32::try_from(chunk_indices_silent.len()).unwrap_or(u32::MAX),
+            index_next: 0,
+            pending: transcribe_chunked_pending(chunk_indices_silent),
+        }
+    }
+
+    fn accept(
+        &mut self,
+        chunk_index: u32,
+        parsed: APIResponse,
+        progress: Option<&TranscribeProgress>,
+    ) {
+        self.completion_count += 1;
+
+        tracing::info!(
+            target: "scribe_lib::transcription",
+            "chunk completed {}/{} (index={})",
+            self.completion_count,
+            self.chunk_count,
+            chunk_index
+        );
+
+        let previous = self.pending.insert(chunk_index, parsed);
+
+        debug_assert!(previous.is_none());
+
+        transcribe_chunked_drain(
+            &mut self.pending,
+            &mut self.completed,
+            &mut self.index_next,
+            progress,
+            f64::from(self.chunk_seconds),
+        );
+    }
+
+    fn finish(
+        mut self,
+        progress: Option<&TranscribeProgress>,
+    ) -> AppResult<Vec<(u32, APIResponse)>> {
+        transcribe_chunked_drain(
+            &mut self.pending,
+            &mut self.completed,
+            &mut self.index_next,
+            progress,
+            f64::from(self.chunk_seconds),
+        );
+
+        transcribe_chunked_complete(&self.completed, self.chunk_count as usize)?;
+
+        debug_assert!(self.pending.is_empty());
+
+        Ok(self.completed)
+    }
+}
+
 async fn transcribe_chunked_collect(
     chunk_payloads: Vec<ChunkPayload>,
     chunk_indices_silent: Vec<u32>,
     upload: ChunkUpload<'_>,
-    chunk_seconds: f64,
+    chunk_seconds: u32,
     progress: Option<&TranscribeProgress>,
     cancel_flag: Option<&AtomicBool>,
 ) -> AppResult<Vec<(u32, APIResponse)>> {
     let chunk_count = chunk_payloads.len() + chunk_indices_silent.len();
-    let mut completed: Vec<(u32, APIResponse)> = Vec::with_capacity(chunk_count);
-    let mut pending = transcribe_chunked_pending(&chunk_indices_silent);
-    let mut completion_count = chunk_indices_silent.len();
-    let mut chunk_index_next: u32 = 0;
+    let chunk_count_bounded = u32::try_from(chunk_count).unwrap_or(CHUNK_COUNT_MAX);
+    let mut collection =
+        ChunkCollection::new(chunk_count_bounded, chunk_seconds, &chunk_indices_silent);
     let mut stream = transcribe_chunked_stream(chunk_payloads, upload);
     let cancel_poll = Duration::from_millis(CANCEL_POLL_INTERVAL_MS);
 
@@ -265,49 +339,46 @@ async fn transcribe_chunked_collect(
             return Err(AppError::Transcription("Cancelled".into()));
         }
 
-        let result = match tokio::time::timeout(cancel_poll, stream.next()).await {
-            Ok(Some(result)) => result,
+        let (chunk, result) = match tokio::time::timeout(cancel_poll, stream.next()).await {
+            Ok(Some(item)) => item,
             Ok(None) => break,
             Err(_elapsed) => continue,
         };
 
-        let (chunk_index, parsed) = result?;
-        completion_count += 1;
+        let parsed = result.map_err(|error| {
+            AppError::Transcription(format!(
+                "the part at {} did not come back after {RETRY_ATTEMPTS_MAX} attempts: {error}",
+                chunk_range_text(chunk.index, chunk_seconds)
+            ))
+        })?;
 
-        tracing::info!(
-            target: "scribe_lib::transcription",
-            "chunk completed {}/{} (index={})",
-            completion_count,
-            chunk_count,
-            chunk_index
-        );
-
-        let previous = pending.insert(chunk_index, parsed);
-
-        debug_assert!(previous.is_none());
-
-        transcribe_chunked_drain(
-            &mut pending,
-            &mut completed,
-            &mut chunk_index_next,
-            progress,
-            chunk_seconds,
-        );
+        collection.accept(chunk.index, parsed, progress);
     }
 
-    transcribe_chunked_drain(
-        &mut pending,
-        &mut completed,
-        &mut chunk_index_next,
-        progress,
-        chunk_seconds,
-    );
+    drop(stream);
 
-    transcribe_chunked_complete(&completed, chunk_count)?;
+    collection.finish(progress)
+}
 
-    debug_assert!(pending.is_empty());
+fn chunk_range_text(chunk_index: u32, chunk_seconds: u32) -> String {
+    debug_assert!(chunk_seconds > 0);
 
-    Ok(completed)
+    let start = u64::from(chunk_index) * u64::from(chunk_seconds);
+    let end = start + u64::from(chunk_seconds);
+
+    format!("{} to {}", clock_text(start), clock_text(end))
+}
+
+fn clock_text(seconds_total: u64) -> String {
+    let hours = seconds_total.div_euclid(3600);
+    let minutes = seconds_total.rem_euclid(3600).div_euclid(60);
+    let rest = seconds_total.rem_euclid(60);
+
+    if hours > 0 {
+        return format!("{hours}:{minutes:02}:{rest:02}");
+    }
+
+    format!("{minutes}:{rest:02}")
 }
 
 fn transcribe_chunked_pending(chunk_indices_silent: &[u32]) -> BTreeMap<u32, APIResponse> {
@@ -328,13 +399,13 @@ fn transcribe_chunked_pending(chunk_indices_silent: &[u32]) -> BTreeMap<u32, API
 fn transcribe_chunked_stream(
     chunk_payloads: Vec<ChunkPayload>,
     upload: ChunkUpload<'_>,
-) -> impl Stream<Item = AppResult<(u32, APIResponse)>> + '_ {
+) -> impl Stream<Item = (ChunkPayload, AppResult<APIResponse>)> + '_ {
     debug_assert!(chunk_payloads.len() <= CHUNK_COUNT_MAX as usize);
 
     futures_util::stream::iter(chunk_payloads.into_iter().map(move |chunk| async move {
-        let parsed = upload_chunk(upload, chunk.bytes, chunk.name).await?;
+        let result = upload_chunk(upload, &chunk.bytes, &chunk.name).await;
 
-        Ok::<(u32, APIResponse), AppError>((chunk.index, parsed))
+        (chunk, result)
     }))
     .buffer_unordered(CHUNK_CONCURRENCY_MAX as usize)
 }
@@ -416,13 +487,7 @@ fn transcribe_chunked_assemble(
         let api_segments = parsed.segments.unwrap_or_default();
 
         if api_segments.is_empty() {
-            if !text_trimmed.is_empty() {
-                segments.push(TranscriptSegment {
-                    text: text_trimmed.to_owned(),
-                    start_seconds: offset,
-                    end_seconds: offset + chunk_seconds,
-                });
-            }
+            segments.extend(segments_from_text(text_trimmed, offset, offset + chunk_seconds));
         } else {
             for segment in api_segments {
                 segments.push(TranscriptSegment {
@@ -527,13 +592,74 @@ fn chunk_progress_emit(
             }
         }
         _ => {
-            let text_trimmed = parsed.text.trim();
+            let sentences = segments_from_text(parsed.text.trim(), offset, offset + chunk_seconds);
 
-            if !text_trimmed.is_empty() {
-                progress_emit_segment(progress, text_trimmed, offset, offset + chunk_seconds);
+            for sentence in &sentences {
+                progress_emit_segment(
+                    progress,
+                    &sentence.text,
+                    sentence.start_seconds,
+                    sentence.end_seconds,
+                );
             }
         }
     }
+}
+
+fn segments_from_text(text: &str, start_seconds: f64, end_seconds: f64) -> Vec<TranscriptSegment> {
+    debug_assert!(end_seconds >= start_seconds);
+
+    let mut sentences: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut ended_previous = false;
+
+    for character in text.chars() {
+        if ended_previous {
+            if character.is_whitespace() {
+                if sentences.len() < SENTENCES_PER_CHUNK_MAX as usize - 1 {
+                    sentences.push(current.trim().to_owned());
+                    current.clear();
+                }
+            }
+        }
+
+        current.push(character);
+        ended_previous = SENTENCE_ENDS.contains(&character);
+    }
+
+    if !current.trim().is_empty() {
+        sentences.push(current.trim().to_owned());
+    }
+
+    sentences.retain(|sentence| !sentence.is_empty());
+
+    let chars_total: u32 = sentences
+        .iter()
+        .map(|sentence| u32::try_from(sentence.chars().count()).unwrap_or(u32::MAX))
+        .fold(0_u32, u32::saturating_add);
+
+    let mut segments: Vec<TranscriptSegment> = Vec::with_capacity(sentences.len());
+    let mut chars_before: u32 = 0;
+    let span = end_seconds - start_seconds;
+
+    for sentence in sentences {
+        let chars = u32::try_from(sentence.chars().count()).unwrap_or(u32::MAX);
+        let fraction_start = f64::from(chars_before) / f64::from(chars_total.max(1));
+        let chars_through = chars_before.saturating_add(chars);
+        let fraction_end = f64::from(chars_through) / f64::from(chars_total.max(1));
+
+        segments.push(TranscriptSegment {
+            text: sentence,
+            start_seconds: span.mul_add(fraction_start, start_seconds),
+            end_seconds: span.mul_add(fraction_end, start_seconds),
+        });
+
+        chars_before = chars_before.saturating_add(chars);
+    }
+
+    debug_assert!(segments.len() <= SENTENCES_PER_CHUNK_MAX as usize);
+
+    segments
 }
 
 fn progress_emit_segment(
@@ -563,8 +689,8 @@ fn progress_emit_segment(
 
 async fn upload_chunk(
     upload: ChunkUpload<'_>,
-    bytes: Vec<u8>,
-    file_name: String,
+    bytes: &[u8],
+    file_name: &str,
 ) -> AppResult<APIResponse> {
     debug_assert!(!file_name.is_empty());
     debug_assert!(!upload.model.is_empty());
@@ -576,8 +702,8 @@ async fn upload_chunk(
     let client = client_get(&HTTP_CLIENT)?;
 
     retry_run(|| async {
-        let part = multipart::Part::bytes(bytes.clone())
-            .file_name(file_name.clone())
+        let part = multipart::Part::bytes(bytes.to_vec())
+            .file_name(file_name.to_owned())
             .mime_str("audio/wav")?;
 
         let mut form = multipart::Form::new()
@@ -776,6 +902,30 @@ mod tests {
 
         assert_eq!(uploaded, vec![0]);
         assert_eq!(silent, vec![1, 2]);
+    }
+
+    #[test]
+    fn chunk_text_splits_into_sentences_with_proportional_times() {
+        let segments = segments_from_text("One two. Three four? Five!", 100.0, 124.0);
+
+        assert_eq!(segments.len(), 3);
+        assert_eq!(segments[0].text, "One two.");
+        assert_eq!(segments[1].text, "Three four?");
+        assert_eq!(segments[2].text, "Five!");
+        assert!((segments[0].start_seconds - 100.0).abs() < f64::EPSILON);
+        assert!((segments[0].end_seconds - 108.0).abs() < f64::EPSILON);
+        assert!((segments[2].end_seconds - 124.0).abs() < f64::EPSILON);
+        assert!(segments_from_text("   ", 0.0, 5.0).is_empty());
+        assert_eq!(segments_from_text("no terminator here", 0.0, 5.0).len(), 1);
+        assert_eq!(segments_from_text("It is 10.30 now. Ok.", 0.0, 5.0).len(), 2);
+    }
+
+    #[test]
+    fn a_chunk_range_reads_as_a_clock_span_and_grows_hours_when_needed() {
+        assert_eq!(chunk_range_text(72, 30), "36:00 to 36:30");
+        assert_eq!(chunk_range_text(0, 30), "0:00 to 0:30");
+        assert_eq!(chunk_range_text(120, 30), "1:00:00 to 1:00:30");
+        assert_eq!(clock_text(3599), "59:59");
     }
 
     #[test]

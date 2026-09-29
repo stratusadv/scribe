@@ -39,7 +39,7 @@ function save_click() {
                 <label class="label">First name</label>
                 <input
                     v-model="name_first"
-                    type="text"
+                    type="search"
                     class="input"
                     maxlength="120"
                     placeholder="e.g. John"
@@ -50,7 +50,7 @@ function save_click() {
                 <label class="label">Last name</label>
                 <input
                     v-model="name_last"
-                    type="text"
+                    type="search"
                     class="input"
                     maxlength="120"
                     placeholder="e.g. Doe"
@@ -63,7 +63,7 @@ function save_click() {
             <label class="label">Role</label>
             <input
                 v-model="role"
-                type="text"
+                type="search"
                 class="input"
                 maxlength="120"
                 placeholder="e.g. project manager, accountant, sales rep"

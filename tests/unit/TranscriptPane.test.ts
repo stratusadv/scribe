@@ -58,6 +58,27 @@ afterEach(() => {
 })
 
 describe('TranscriptPane', () => {
+    it('labels rows by line number when no segment carries timing', async () => {
+        const untimed = transcript_build(LINES)
+
+        for (const segment of untimed.segments) {
+            segment.start_seconds = 0
+            segment.end_seconds = 0
+        }
+
+        const wrapper = mount_pane(untimed)
+
+        await flushPromises()
+
+        expect(row_texts(wrapper)).toHaveLength(3)
+
+        expect(wrapper.findAll('.transcript-pane-row-time').map((time) => time.text())).toEqual([
+            'Line 1',
+            'Line 2',
+            'Line 4',
+        ])
+    })
+
     it('renders one row per non-blank segment with its start time', async () => {
         const wrapper = mount_pane()
 

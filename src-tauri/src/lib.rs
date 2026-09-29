@@ -74,6 +74,26 @@ pub const APP_DATA_FOLDER: &str = "com.stratusadv.scribe";
 const LOGS_FOLDER: &str = "logs";
 const LOG_FILE_PREFIX: &str = "scribe";
 const WINDOW_LABEL_MAIN: &str = "main";
+
+#[cfg(target_os = "linux")] // tigerstyle-ignore: TS035
+fn web_process_recovery_install(window: &tauri::WebviewWindow) {
+    use webkit2gtk::WebViewExt;
+
+    let installed = window.with_webview(|webview| {
+        webview.inner().connect_web_process_terminated(|webview, reason| {
+            tracing::error!("webkit web process terminated ({reason:?}), reloading the page");
+
+            webview.reload();
+        });
+    });
+
+    if let Err(error) = installed {
+        tracing::warn!("web process recovery handler not installed: {error}");
+    }
+}
+
+#[cfg(not(target_os = "linux"))] // tigerstyle-ignore: TS035
+const fn web_process_recovery_install(_window: &tauri::WebviewWindow) {}
 static LOG_GUARD: OnceLock<WorkerGuard> = OnceLock::new();
 
 fn tracing_log_directory() -> PathBuf {
@@ -167,6 +187,7 @@ pub fn run() {
         .setup(|app| {
             if let Some(window) = app.get_webview_window(WINDOW_LABEL_MAIN) {
                 microphone_permission_install(&window);
+                web_process_recovery_install(&window);
             }
 
             Ok(())

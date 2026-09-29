@@ -137,11 +137,11 @@ function patch_build(): JobMetaPatch {
     const people = people_present.value
 
     return {
-        title: title_input.value.trim() || null,
+        title: title_input.value.trim(),
         attendees: people.length > 0 ? people.map(person_name_full) : attendees_legacy.value,
         person_ids: people.map((person) => person.id),
         person_ids_mentioned: people_mentioned.value.map((person) => person.id),
-        project: project_input.value.trim() || null,
+        project: project_input.value.trim(),
         tags: [...tags_current.value],
     }
 }
@@ -228,7 +228,7 @@ async function next() {
                     <input
                         id="details-title"
                         v-model="title_input"
-                        type="text"
+                        type="search"
                         class="input"
                     />
                 </div>

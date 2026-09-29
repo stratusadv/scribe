@@ -20,6 +20,7 @@ const SPELLING_HINT_CHARS_MAX: u32 = 600;
 pub(crate) struct TranscriptionResult {
     pub(crate) job_id: String,
     pub(crate) transcript: Transcript,
+    pub(crate) cached: bool,
 }
 
 pub(crate) fn audio_prepare_blocking(source_path: &Path) -> AppResult<(String, PathBuf)> {
@@ -112,6 +113,7 @@ fn metadata_recorded_at_unix(metadata: &std::fs::Metadata) -> Option<i64> {
 pub(crate) async fn transcribe_remote_async(
     source_path: &Path,
     endpoint_id: &str,
+    transcript_reuse: bool,
     progress: Option<TranscribeProgress>,
 ) -> AppResult<TranscriptionResult> {
     let endpoint = endpoint_load(endpoint_id)?;
@@ -129,12 +131,22 @@ pub(crate) async fn transcribe_remote_async(
     let (job_id, audio_path) =
         crate::blocking::run(move || audio_prepare_blocking(&source_owned)).await?;
 
-    if let Some(cached) = workspace::transcript_load::<Transcript>(&job_id, &engine_id)? {
+    let cached = if transcript_reuse {
+        workspace::transcript_load::<Transcript>(&job_id, &engine_id)?
+    } else {
+        None
+    };
+
+    if let Some(cached) = cached {
         if let Some(progress) = progress.as_ref() {
             progress.emit_stage("done");
         }
 
-        return Ok(TranscriptionResult { job_id, transcript: cached });
+        return Ok(TranscriptionResult {
+            job_id,
+            transcript: cached,
+            cached: true,
+        });
     }
 
     if let Some(progress) = progress.as_ref() {
@@ -156,7 +168,11 @@ pub(crate) async fn transcribe_remote_async(
         progress.emit_stage("done");
     }
 
-    Ok(TranscriptionResult { job_id, transcript })
+    Ok(TranscriptionResult {
+        job_id,
+        transcript,
+        cached: false,
+    })
 }
 
 fn transcribe_remote_spelling_hint() -> String {
@@ -301,7 +317,11 @@ pub(crate) fn transcript_import_blocking(
 
     workspace::transcript_save(&job_id, ENGINE_ID_IMPORTED, &transcript)?;
 
-    Ok(TranscriptionResult { job_id, transcript })
+    Ok(TranscriptionResult {
+        job_id,
+        transcript,
+        cached: false,
+    })
 }
 
 fn transcript_import_meta(
@@ -567,5 +587,38 @@ mod tests {
 
     fn root_path() -> PathBuf {
         workspace::root().unwrap()
+    }
+
+    #[test]
+    #[ignore = "manual: hits the configured transcription endpoint with SCRIBE_MANUAL_AUDIO"]
+    fn manual_remote_transcription_of_a_local_file() {
+        let audio = std::env::var("SCRIBE_MANUAL_AUDIO").expect("SCRIBE_MANUAL_AUDIO");
+        let endpoint_id = std::env::var("SCRIBE_MANUAL_ENDPOINT").expect("SCRIBE_MANUAL_ENDPOINT");
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+
+        tracing_subscriber::fmt()
+            .with_env_filter("scribe_lib=debug,info")
+            .with_ansi(false)
+            .init();
+
+        let started = std::time::Instant::now();
+
+        let result = runtime.block_on(transcribe_remote_async(
+            Path::new(&audio),
+            &endpoint_id,
+            false,
+            None,
+        ));
+
+        match result {
+            Ok(result) => println!(
+                "MANUAL_OK job={} segments={} chars={} seconds={}",
+                result.job_id,
+                result.transcript.segments.len(),
+                result.transcript.text.chars().count(),
+                started.elapsed().as_secs()
+            ),
+            Err(error) => println!("MANUAL_ERROR after {}s: {error}", started.elapsed().as_secs()),
+        }
     }
 }

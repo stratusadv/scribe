@@ -17,6 +17,7 @@ export interface LineCorrection {
 export interface TranscriptionResult {
     job_id: string
     transcript: Transcript
+    cached: boolean
 }
 
 export interface Waveform {

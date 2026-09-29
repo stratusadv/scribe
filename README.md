@@ -93,8 +93,8 @@ The public key lives in `plugins.updater.pubkey` in `src-tauri/tauri.conf.json`.
 Each release bumps `version` in `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and `package.json` in one commit. The tag then triggers the build:
 
 ```
-git tag v0.1.4
-git push origin v0.1.4
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
 A local build signs the same way, with the key contents in the environment:

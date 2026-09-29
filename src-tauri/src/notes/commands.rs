@@ -108,6 +108,8 @@ const PROMPT_TRANSCRIPT_CORRECT_SYSTEM: &str = concat!(
     "summarize, merge, split, reorder, add, or remove lines.\n",
     "- Apply the instruction on every line it applies to, not only the first.\n",
     "- If nothing needs to change, output nothing.\n",
+    "- If the instruction is not a correction, for example it asks for a summary, a rewrite, ",
+    "or a translation, output nothing.\n",
     "- No preamble, no explanation, no code fences."
 );
 

@@ -63,6 +63,10 @@ const filter_regex = computed<RegExp | null>(() => {
     return new RegExp(needle.replace(REGEX_ESCAPE, '\\$&'), 'i')
 })
 
+const timing_present = computed(
+    () => props.transcript?.segments.some((segment) => segment.end_seconds > 0) ?? false,
+)
+
 const rows_filtered = computed<DisplayRow[]>(() => {
     const regex = filter_regex.value
 
@@ -126,6 +130,12 @@ function highlights_apply() {
     }
 
     registry.set(HIGHLIGHT_NAME, new Highlight(...ranges))
+}
+
+function row_label(row: DisplayRow): string {
+    if (timing_present.value) return seconds_to_clock(row.start_seconds)
+
+    return `Line ${row.segment_index + 1}`
 }
 
 function rows_render_grow() {
@@ -353,7 +363,7 @@ onUnmounted(() => {
             <div class="text-sm font-medium">Transcript</div>
             <input
                 v-model="filter_text"
-                type="text"
+                type="search"
                 class="input transcript-pane-filter"
                 placeholder="Filter…"
             />
@@ -419,7 +429,7 @@ onUnmounted(() => {
                 <div class="transcript-pane-row-body">
                     <div class="transcript-pane-row-meta">
                         <span class="transcript-pane-row-time">
-                            {{ seconds_to_clock(row.start_seconds) }}
+                            {{ row_label(row) }}
                         </span>
                         <span v-if="index_copied === index" class="pill-active">Copied</span>
                     </div>

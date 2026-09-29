@@ -18,7 +18,7 @@ import { use_tasks, is_cancelled_error } from '../composables/use_tasks'
 import NoticeBanner from './NoticeBanner.vue'
 import StepBar from './StepBar.vue'
 import TranscriptPane from './TranscriptPane.vue'
-import type { SegmentChunk, StageChunk, TranscriptionStage } from '../types'
+import type { LineCorrection, SegmentChunk, StageChunk, TranscriptionStage } from '../types'
 
 
 interface TypewriterPace {
@@ -78,9 +78,11 @@ const stage_active = ref<TranscriptionStage | null>(null)
 const streaming_box = ref<HTMLElement | null>(null)
 const display_text = ref<string>('')
 const transcript_copied = ref(false)
+const transcript_cached = ref(false)
 const correction_instruction = ref('')
 const correction_busy = ref(false)
 const correction_indexes = ref<number[]>([])
+const correction_undo = ref<LineCorrection[] | null>(null)
 let transcript_copied_timer: ReturnType<typeof setTimeout> | null = null
 let buffer_pending = ''
 let typewriter_handle: number | null = null
@@ -332,7 +334,7 @@ async function file_pick() {
     }
 }
 
-async function transcribe() {
+async function transcribe(transcript_reuse = true) {
     const source_for_task = source_path.value
     const endpoint_for_task = endpoint_id_selected.value
 
@@ -345,6 +347,9 @@ async function transcribe() {
     stream_id_active.value = stream_id
     stage_active.value = null
     transcript.value = null
+    transcript_cached.value = false
+    correction_indexes.value = []
+    correction_undo.value = null
 
     typewriter_reset()
 
@@ -356,10 +361,16 @@ async function transcribe() {
             runner: async () => {
                 if (!endpoint_for_task) throw new Error(MESSAGE_NO_ENDPOINT)
 
-                return await ipc.transcription_remote(source_for_task, endpoint_for_task, stream_id)
+                return await ipc.transcription_remote(
+                    source_for_task,
+                    endpoint_for_task,
+                    stream_id,
+                    transcript_reuse,
+                )
             },
             on_success: (result, task) => {
                 transcript.value = result.transcript
+                transcript_cached.value = result.cached
                 job_id_current.value = result.job_id
                 task.job_id = result.job_id
 
@@ -409,15 +420,41 @@ async function correct() {
             instruction,
         )
 
+        const originals = corrections.flatMap((correction) => {
+            const text = lines[correction.index]
+
+            return text === undefined ? [] : [{ index: correction.index, text }]
+        })
+
         await transcript_segments_text_set(corrections)
 
         correction_indexes.value = corrections.map((correction) => correction.index)
-        correction_instruction.value = ''
+        correction_undo.value = originals.length > 0 ? originals : null
     } catch (error) {
         if (!is_cancelled_error(error)) {
             error_message.value = String(error)
             await error_dialog_show(error)
         }
+    } finally {
+        correction_busy.value = false
+    }
+}
+
+async function correction_undo_apply() {
+    const originals = correction_undo.value
+
+    if (!originals || correction_busy.value) return
+
+    correction_busy.value = true
+    correction_undo.value = null
+    correction_indexes.value = []
+
+    try {
+        await transcript_segments_text_set(originals)
+    } catch (error) {
+        error_message.value = String(error)
+
+        await error_dialog_show(error)
     } finally {
         correction_busy.value = false
     }
@@ -454,6 +491,19 @@ use_shortcuts({
 
         <NoticeBanner v-if="error_message" @dismiss="error_message = null">
             {{ error_message }}
+        </NoticeBanner>
+
+        <NoticeBanner
+            v-if="transcript_cached && transcript && !busy"
+            kind="info"
+            @dismiss="transcript_cached = false"
+        >
+            This recording was already transcribed, so its stored transcript is shown.
+            <template #actions>
+                <button class="btn-default" :disabled="!can_transcribe" @click="transcribe(false)">
+                    Transcribe again
+                </button>
+            </template>
         </NoticeBanner>
 
         <div v-if="!transcript && !busy" class="file-picker">
@@ -525,12 +575,21 @@ use_shortcuts({
         <form v-if="transcript && !busy" class="correction-bar" @submit.prevent="correct">
             <input
                 v-model="correction_instruction"
-                type="text"
+                type="search"
                 class="input"
                 :disabled="correction_busy"
                 placeholder="Tell the AI what to fix, e.g. 'it is Jon, not John'"
                 aria-label="Correction instruction"
             />
+            <button
+                v-if="correction_undo"
+                type="button"
+                class="btn-default"
+                :disabled="correction_busy"
+                @click="correction_undo_apply"
+            >
+                Undo
+            </button>
             <button type="submit" class="btn-primary" :disabled="!can_correct">
                 {{ correction_busy ? 'Working…' : 'Apply' }}
             </button>
@@ -554,7 +613,7 @@ use_shortcuts({
                     v-if="!transcript || busy"
                     class="btn-primary"
                     :disabled="!can_transcribe"
-                    @click="transcribe"
+                    @click="transcribe()"
                 >
                     {{ transcribe_label }}
                 </button>
@@ -609,6 +668,7 @@ use_shortcuts({
     flex: 1;
 }
 
+.correction-bar .btn-default,
 .correction-bar .btn-primary {
     white-space: nowrap;
 }

@@ -156,7 +156,7 @@ describe('PeoplePicker', () => {
     it('filters people by name or role and groups by name', async () => {
         await mount_picker()
 
-        const filter = root()?.querySelector<HTMLInputElement>('input[type="search"]')
+        const filter = root()?.querySelector<HTMLInputElement>('input[aria-label="Find a person"]')
 
         if (!filter) throw new Error('filter input missing')
 
@@ -214,7 +214,7 @@ describe('PeoplePicker', () => {
 
         if (!first_name) throw new Error('person form missing')
 
-        expect(root()?.querySelector('input[type="search"]')).toBeNull()
+        expect(root()?.querySelector('input[aria-label="Find a person"]')).toBeNull()
 
         first_name.value = 'Ada'
         first_name.dispatchEvent(new Event('input'))
@@ -234,7 +234,7 @@ describe('PeoplePicker', () => {
 
         expect(saved?.name_first).toBe('Ada')
         expect(emitted_ids(wrapper)?.[0]).toEqual(['sam', saved?.id])
-        expect(root()?.querySelector('input[type="search"]')).not.toBeNull()
+        expect(root()?.querySelector('input[aria-label="Find a person"]')).not.toBeNull()
         expect(dialog.current.value).toBeNull()
     })
 

@@ -11,6 +11,7 @@ pub(crate) async fn transcription_remote(
     audio_path: String,
     endpoint_id: String,
     stream_id: Option<String>,
+    transcript_reuse: bool,
 ) -> AppResult<TranscriptionResult> {
     if let Some(stream_id) = stream_id.as_deref() {
         stream_id_validate(stream_id)?;
@@ -23,7 +24,7 @@ pub(crate) async fn transcription_remote(
         stream_id: id,
     });
 
-    transcribe_remote_async(&source_path, &endpoint_id, progress).await
+    transcribe_remote_async(&source_path, &endpoint_id, transcript_reuse, progress).await
 }
 
 #[tauri::command(rename_all = "snake_case")]
