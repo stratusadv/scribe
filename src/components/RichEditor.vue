@@ -53,7 +53,6 @@ const MESSAGE_EMPTY_DOCUMENT = 'There is nothing to rewrite yet.'
 const MESSAGE_EMPTY_REPLY = 'The AI did not return any text.'
 const MESSAGE_EMPTY_LAYOUT = 'The AI did not return anything.'
 const MESSAGE_DESCRIBE_FIRST = 'Describe the document first.'
-const MESSAGE_SELECTION_LOST = 'Select the text again.'
 const HTML_BLOCK_START = /^<(?:p|h[1-6]|ul|ol|li|blockquote|pre|table|hr|div|span|strong|em|code|br)\b/i
 
 const AI_QUICK_ACTIONS: AIQuickAction[] = [
@@ -215,22 +214,23 @@ function refresh_state(editor_current: Editor) {
 function ai_range_set(editor_current: Editor) {
     const { from, to } = editor_current.state.selection
 
-    if (from === to) return
-
-    ai_range.value = { from, to }
+    ai_range.value = from === to ? null : { from, to }
     ai_selected_preview.value = editor_current.state.doc.textBetween(from, to, '\n')
 }
 
-function ai_range_clamped(editor_current: Editor): AIRange | null {
-    const range = ai_range.value
+function selection_clear_on_outside(event: MouseEvent) {
+    const editor_current = editor.value
+    const root = root_ref.value
 
-    if (!range) return null
+    if (!editor_current || !root) return
+    if (event.target instanceof Node && root.contains(event.target)) return
+    if (editor_current.state.selection.empty) return
 
-    const to = Math.min(range.to, editor_current.state.doc.content.size)
-
-    if (range.from >= to) return { from: 0, to: 0 }
-
-    return { from: range.from, to }
+    editor_current
+        .chain()
+        .setMeta('pointer', true)
+        .setTextSelection(editor_current.state.selection.to)
+        .run()
 }
 
 const extensions = [
@@ -316,6 +316,8 @@ watch(
 )
 
 onMounted(() => {
+    document.addEventListener('mousedown', selection_clear_on_outside, true)
+
     const root = root_ref.value
 
     if (!root) return
@@ -334,6 +336,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+    document.removeEventListener('mousedown', selection_clear_on_outside, true)
     resize_observer?.disconnect()
     editor.value?.destroy()
 })
@@ -462,8 +465,6 @@ function ai_open() {
     if (!props.ai_rewrite) return
     if (!editor_current) return
 
-    ai_range.value = null
-    ai_selected_preview.value = ''
     ai_instruction.value = ''
     ai_error.value = ''
     ai_panel_open.value = true
@@ -572,14 +573,7 @@ async function ai_apply(instruction: string) {
         return
     }
 
-    const range = ai_range_clamped(editor_current)
-
-    if (range && range.from === range.to) {
-        ai_error.value = MESSAGE_SELECTION_LOST
-
-        return
-    }
-
+    const range = ai_range.value
     const whole_document = range === null
 
     const text_original = range

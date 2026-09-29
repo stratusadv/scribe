@@ -145,6 +145,21 @@ test('Strikethrough and inline code toggle', async ({ page }) => {
     await expect(editor(page).locator('code')).toHaveCount(0)
 })
 
+test('the inline code button only reads as on inside inline code', async ({ page }) => {
+    await notes_open(page)
+    await editor(page).getByText(LINE_FIRST).click()
+
+    const button = toolbar_button(page, 'Inline code')
+
+    await expect(button).not.toHaveClass(/rich-tb-btn-active/)
+    await expect(button.locator('code')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+
+    await editor_line_select(page, LINE_SECOND)
+    await button.click()
+
+    await expect(button).toHaveClass(/rich-tb-btn-active/)
+})
+
 test('the heading select changes the block type', async ({ page }) => {
     await notes_open(page)
 
@@ -354,6 +369,27 @@ test('the AI panel opens with the selection count and closes', async ({ page }) 
 
     await expect(ai_panel(page)).toBeHidden()
     await expect(ai_button).toHaveAttribute('aria-expanded', 'false')
+})
+
+test('the selection count follows the selection and resets when it is cleared', async ({ page }) => {
+    await notes_open(page)
+    await editor_line_select(page, LINE_SECOND)
+    await toolbar_button(page, 'Rewrite the selected text with AI').click()
+
+    await expect(ai_panel(page)).toContainText('11 characters selected')
+
+    await editor(page).getByText(LINE_FIRST).click()
+
+    await expect(ai_panel(page)).toContainText('Whole document')
+
+    await editor_line_select(page, LINE_FIRST)
+
+    await expect(ai_panel(page)).toContainText('10 characters selected')
+
+    await page.locator('.notes-controls-toggle').click()
+
+    await expect(ai_panel(page)).toContainText('Whole document')
+    await expect(editor(page).locator('.selection-inactive')).toHaveCount(0)
 })
 
 test('a quick action rewrites only the selection', async ({ page }) => {

@@ -1677,6 +1677,11 @@
     .rich-tb-btn:disabled {
         @apply opacity-50 cursor-not-allowed;
     }
+    .rich-tb-btn code {
+        padding: 0;
+        background-color: transparent;
+        color: inherit;
+    }
     .rich-tb-sep {
         @apply mx-1 h-4 w-px;
         background-color: var(--color-border);

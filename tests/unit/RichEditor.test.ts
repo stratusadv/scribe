@@ -286,20 +286,25 @@ describe('RichEditor AI rewrite', () => {
         vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     })
 
-    it('captures the selection when the panel opens and keeps it through a collapse', async () => {
+    it('follows the selection while the panel is open', async () => {
         const rewrite = rewrite_handler('Rewritten paragraph')
         const wrapper = await mount_editor(MARKDOWN, rewrite)
         const editor = editor_of(wrapper)
 
-        select(editor, 1, 16)
+        select(editor, 1, 6)
         await ai_button(wrapper).trigger('click')
 
-        expect(ai_meta(wrapper)).toBe('15 characters selected')
+        expect(ai_meta(wrapper)).toBe('5 characters selected')
 
         collapse(editor, 20)
         await flushPromises()
 
         expect(editor.state.selection.empty).toBe(true)
+        expect(ai_meta(wrapper)).toBe('Whole document')
+
+        select(editor, 1, 16)
+        await flushPromises()
+
         expect(ai_meta(wrapper)).toBe('15 characters selected')
 
         await quick_action(wrapper, 'Rewrite').trigger('click')
@@ -374,7 +379,7 @@ describe('RichEditor AI rewrite', () => {
         expect(wrapper.get('.rich-editor-ai-error').text()).toBe('Enter an instruction.')
     })
 
-    it('reports a lost selection when the captured range no longer exists', async () => {
+    it('falls back to the whole document when the content is replaced', async () => {
         const rewrite = rewrite_handler('x')
         const wrapper = await mount_editor(MARKDOWN, rewrite)
         const editor = editor_of(wrapper)
@@ -386,11 +391,32 @@ describe('RichEditor AI rewrite', () => {
         expect(ai_meta(wrapper)).toBe('8 characters selected')
 
         editor.commands.setContent('Tiny', { emitUpdate: false })
+        await flushPromises()
+
+        expect(ai_meta(wrapper)).toBe('Whole document')
+
         await quick_action(wrapper, 'Expand').trigger('click')
         await flushPromises()
 
-        expect(rewrite).not.toHaveBeenCalled()
-        expect(wrapper.get('.rich-editor-ai-error').text()).toBe('Select the text again.')
+        expect(rewrite.mock.calls[0]?.[0]?.text).toBe('Tiny')
+        expect(rewrite.mock.calls[0]?.[0]?.whole_document).toBe(true)
+    })
+
+    it('clears the selection on a press outside the editor and keeps it on one inside', async () => {
+        const wrapper = await mount_editor(MARKDOWN, rewrite_handler('x'))
+        const editor = editor_of(wrapper)
+
+        select(editor, 1, 16)
+        await ai_button(wrapper).trigger('click')
+        await wrapper.get('.rich-editor-ai-input').trigger('mousedown')
+
+        expect(ai_meta(wrapper)).toBe('15 characters selected')
+
+        document.body.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+        await flushPromises()
+
+        expect(editor.state.selection.empty).toBe(true)
+        expect(ai_meta(wrapper)).toBe('Whole document')
     })
 
     it('shows the handler error message and stays open', async () => {
