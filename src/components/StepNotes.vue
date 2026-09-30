@@ -568,7 +568,26 @@ use_shortcuts({
                     class="notes-stream-pane"
                 >{{ notes_markdown }}<span class="streaming-caret">▌</span></pre>
             </div>
-            <div v-else-if="!notes_present" class="notes-empty" />
+            <div v-else-if="!notes_present" class="notes-empty">
+                <span class="empty-badge">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                    >
+                        <path d="M6 3h9l5 5v13H6z" />
+                        <path d="M15 3v5h5" />
+                        <path d="M9 12h6" />
+                        <path d="M9 16h4" />
+                    </svg>
+                </span>
+                <h3>No notes yet</h3>
+                <p v-if="!transcript" class="meta">Transcribe a recording first.</p>
+            </div>
             <RichEditorAsync
                 v-else
                 v-model="notes_markdown"

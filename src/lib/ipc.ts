@@ -184,6 +184,9 @@ export const ipc = Object.freeze({
     job_waveform_get(job_id: string, bar_count: number) {
         return invoke<Waveform | null>('job_waveform_get', { job_id, bar_count })
     },
+    job_audio_clip_get(job_id: string, start_seconds: number, end_seconds: number) {
+        return invoke<string | null>('job_audio_clip_get', { job_id, start_seconds, end_seconds })
+    },
     job_audio_path_get(job_id: string) {
         return invoke<string | null>('job_audio_path_get', { job_id })
     },

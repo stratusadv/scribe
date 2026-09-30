@@ -20,6 +20,7 @@ use endpoints::commands::{endpoints_list, service_api_key_set, service_status};
 use error::AppResult;
 use export::{notes_export, notes_print};
 use jobs::commands::{
+    job_audio_clip_get,
     job_audio_path_get,
     job_delete,
     job_meta_get,
@@ -173,10 +174,34 @@ fn window_event_handle(window: &tauri::Window, event: &WindowEvent) {
     }
 }
 
+#[cfg(target_os = "linux")] // tigerstyle-ignore: TS035
+fn realtime_cpu_limit_soften() {
+    let mut limit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+    let read = unsafe { libc::getrlimit(libc::RLIMIT_RTTIME, &raw mut limit) };
+
+    if read != 0 { return; }
+    if limit.rlim_max == libc::RLIM_INFINITY { return; }
+    if limit.rlim_cur < limit.rlim_max { return; }
+
+    limit.rlim_cur = limit.rlim_max / 5 * 4;
+
+    let written = unsafe { libc::setrlimit(libc::RLIMIT_RTTIME, &raw const limit) };
+
+    tracing::info!(
+        target: "scribe_lib",
+        "realtime cpu limit softened to {} of {} microseconds (result {written})",
+        limit.rlim_cur,
+        limit.rlim_max
+    );
+}
+
 // tigerstyle-ignore: TS020
 #[expect(clippy::exit, reason = "the exit call lives inside tauri::generate_context!")]
 pub fn run() {
     tracing_initialize();
+
+    #[cfg(target_os = "linux")]
+    realtime_cpu_limit_soften();
 
     let result = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -232,6 +257,7 @@ pub fn run() {
             job_transcript_load,
             job_transcript_save,
             job_waveform_get,
+            job_audio_clip_get,
             job_audio_path_get,
             settings_get,
             settings_update,

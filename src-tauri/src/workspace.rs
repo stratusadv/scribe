@@ -12,6 +12,7 @@ pub(crate) const NOTES_BYTES_MAX: u32 = 4 << 20;
 pub(crate) const PCM16_SAMPLE_BYTES: u32 = 2;
 const JOBS_FOLDER: &str = "jobs";
 const AUDIO_FILE_NAME: &str = "audio.wav";
+const CLIP_FILE_PREFIX: &str = "clip-";
 const META_FILE_NAME: &str = "meta.json";
 const NOTES_FILE_NAME: &str = "notes.md";
 const TRANSCRIPT_FILE_PREFIX: &str = "transcript-";
@@ -464,6 +465,90 @@ pub(crate) fn audio_wav_save(samples: &[f32], sample_rate: u32, path: &Path) -> 
         .map_err(|error| AppError::Audio(format!("wav finalize: {error}")))?;
 
     Ok(())
+}
+
+pub(crate) fn audio_clip_save(
+    path_source: &Path,
+    start_seconds: f64,
+    end_seconds: f64,
+    path_clip: &Path,
+) -> AppResult<()> {
+    debug_assert!(start_seconds >= 0.0);
+    debug_assert!(end_seconds > start_seconds);
+
+    let mut reader = wav_reader_open(path_source)?;
+    let specification = reader.spec();
+    let rate = f64::from(specification.sample_rate);
+    let length = reader.len();
+    let sample_start = sample_index_clamp((start_seconds * rate).floor(), length);
+    let sample_end = sample_index_clamp((end_seconds * rate).ceil(), length);
+
+    if sample_end <= sample_start {
+        return Err(AppError::Audio("the clip lies past the end of the audio".into()));
+    }
+
+    reader
+        .seek(sample_start)
+        .map_err(|error| AppError::Audio(format!("wav seek: {error}")))?;
+
+    let mut writer = hound::WavWriter::create(path_clip, specification)
+        .map_err(|error| AppError::Audio(format!("wav create: {error}")))?;
+
+    for sample in reader.samples::<i16>().take((sample_end - sample_start) as usize) {
+        let value = sample.map_err(|error| AppError::Audio(format!("wav read: {error}")))?;
+
+        writer
+            .write_sample(value)
+            .map_err(|error| AppError::Audio(format!("wav write: {error}")))?;
+    }
+
+    writer
+        .finalize()
+        .map_err(|error| AppError::Audio(format!("wav finalize: {error}")))?;
+
+    Ok(())
+}
+
+pub(crate) fn job_audio_clip_path(id: &str, start_seconds: f64, end_seconds: f64) -> AppResult<PathBuf> {
+    debug_assert!(start_seconds >= 0.0);
+    debug_assert!(end_seconds > start_seconds);
+
+    let start_milliseconds = milliseconds_for(start_seconds);
+    let end_milliseconds = milliseconds_for(end_seconds);
+    let file_name = format!("{CLIP_FILE_PREFIX}{start_milliseconds}-{end_milliseconds}.wav");
+
+    Ok(job_directory(id)?.join(file_name))
+}
+
+pub(crate) fn job_audio_clips_remove(id: &str) -> AppResult<()> {
+    for entry in fs::read_dir(job_directory(id)?)? {
+        let path = entry?.path();
+        let name = path.file_name().map(|name| name.to_string_lossy().into_owned());
+
+        if name.is_some_and(|name| name.starts_with(CLIP_FILE_PREFIX)) {
+            fs::remove_file(&path)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn milliseconds_for(seconds: f64) -> u64 {
+    let scaled = (seconds * 1000.0).round().max(0.0);
+
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "rounded and floored at zero")]
+    let milliseconds = scaled as u64;
+
+    milliseconds
+}
+
+fn sample_index_clamp(value: f64, length: u32) -> u32 {
+    let scaled = value.clamp(0.0, f64::from(length));
+
+    #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "clamp bounds the value to 0..=length")]
+    let index = scaled as u32;
+
+    index
 }
 
 pub(crate) fn wav_reader_open(path: &Path) -> AppResult<hound::WavReader<BufReader<fs::File>>> {

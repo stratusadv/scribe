@@ -326,6 +326,7 @@ onMounted(() => {
         const entry = entries[0]
 
         if (!entry) return
+        if (!entry.target.isConnected) return
 
         toolbar_collapsed.value = entry.contentRect.width < TOOLBAR_COLLAPSE_WIDTH_PX
 

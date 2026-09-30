@@ -98,6 +98,8 @@ const can_correct = computed(() => {
     return correction_instruction.value.trim().length > 0
 })
 const source_name = computed(() => (source_path.value ? path_file_name(source_path.value) : ''))
+const source_extension = computed(() => source_name.value.split('.').pop()?.toLowerCase() ?? '')
+const source_is_video = computed(() => VIDEO_EXTENSIONS.includes(source_extension.value))
 
 const can_transcribe = computed(() => {
     if (!source_path.value || busy.value || recording.value) return false
@@ -551,8 +553,32 @@ use_shortcuts({
                 </button>
             </template>
             <div v-else class="file-picker-filled">
+                <span class="empty-badge">
+                    <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="1.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        aria-hidden="true"
+                    >
+                        <path d="M6 3h9l5 5v13H6z" />
+                        <path d="M15 3v5h5" />
+                        <template v-if="source_is_video">
+                            <path d="M9 12l6 3-6 3z" />
+                        </template>
+                        <template v-else>
+                            <path d="M9 13v5" />
+                            <path d="M12 11v9" />
+                            <path d="M15 14v3" />
+                        </template>
+                    </svg>
+                </span>
                 <div class="file-picker-name">{{ source_name }}</div>
-                <button type="button" class="btn-default" @click="file_pick">Replace</button>
+                <button type="button" class="btn-default file-picker-replace" @click="file_pick">
+                    Replace
+                </button>
             </div>
         </div>
 

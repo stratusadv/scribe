@@ -4,7 +4,7 @@ use rubato::audioadapter_buffers::direct::InterleavedSlice;
 use rubato::{Async, FixedAsync, PolynomialDegree, Resampler};
 use serde::Serialize;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 use symphonia::core::audio::Channels;
 use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
@@ -88,7 +88,7 @@ pub(crate) fn waveform_compute(audio_path: &Path, bar_count: u32) -> AppResult<W
 
 
 fn waveform_peaks_scan(
-    mut data: impl Read,
+    mut data: impl Read + Seek,
     samples_total: u64,
     bar_count: u32,
 ) -> AppResult<Vec<f32>> {
@@ -96,19 +96,21 @@ fn waveform_peaks_scan(
     debug_assert!(bar_count > 0);
 
     let bucket_size = samples_total.div_ceil(u64::from(bar_count));
+    let sample_bytes = u64::from(PCM16_SAMPLE_BYTES);
     let mut peaks: Vec<f32> = Vec::with_capacity(bar_count as usize);
-    let mut bucket_peak: u16 = 0;
-    let mut bucket_filled: u64 = 0;
-    let mut samples_read: u64 = 0;
     let mut block = vec![0_u8; WAVEFORM_READ_BLOCK_BYTES as usize];
+    let mut bucket_start: u64 = 0;
+
+    let data_start = data
+        .stream_position()
+        .map_err(|error| AppError::Audio(format!("wav seek: {error}")))?;
 
     debug_assert!(bucket_size > 0);
 
-    while samples_read < samples_total {
-        let samples_remaining = samples_total - samples_read;
-        let read_bytes_remaining = samples_remaining.saturating_mul(u64::from(PCM16_SAMPLE_BYTES));
+    while bucket_start < samples_total {
+        let bucket_samples = (samples_total - bucket_start).min(bucket_size);
 
-        let read_bytes_wanted = usize::try_from(read_bytes_remaining)
+        let read_bytes_wanted = usize::try_from(bucket_samples.saturating_mul(sample_bytes))
             .unwrap_or(WAVEFORM_READ_BLOCK_BYTES as usize)
             .min(WAVEFORM_READ_BLOCK_BYTES as usize);
 
@@ -118,37 +120,25 @@ fn waveform_peaks_scan(
             .get_mut(..read_bytes_wanted)
             .ok_or_else(|| AppError::Audio("waveform read block overflow".into()))?;
 
+        data.seek(SeekFrom::Start(data_start + bucket_start * sample_bytes))
+            .map_err(|error| AppError::Audio(format!("wav seek: {error}")))?;
         data.read_exact(block_wanted)
             .map_err(|error| AppError::Audio(format!("wav read: {error}")))?;
 
         let (pairs, _) = block_wanted.as_chunks::<{ PCM16_SAMPLE_BYTES as usize }>();
 
-        for pair in pairs {
-            let magnitude = i16::from_le_bytes(*pair).unsigned_abs();
+        let bucket_peak = pairs
+            .iter()
+            .map(|pair| i16::from_le_bytes(*pair).unsigned_abs())
+            .max()
+            .unwrap_or(0);
 
-            if magnitude > bucket_peak {
-                bucket_peak = magnitude;
-            }
-
-            bucket_filled += 1;
-
-            if bucket_filled == bucket_size {
-                peaks.push(f32::from(bucket_peak) / f32::from(i16::MAX));
-                bucket_peak = 0;
-                bucket_filled = 0;
-            }
-        }
-
-        samples_read += read_bytes_wanted.div_euclid(PCM16_SAMPLE_BYTES as usize) as u64;
-    }
-
-    if bucket_filled > 0 {
         peaks.push(f32::from(bucket_peak) / f32::from(i16::MAX));
+        bucket_start += bucket_size;
     }
 
     waveform_peaks_normalize(&mut peaks);
 
-    debug_assert_eq!(samples_read, samples_total);
     debug_assert!(peaks.len() <= bar_count as usize);
 
     Ok(peaks)
@@ -406,6 +396,7 @@ mod tests {
     use crate::workspace::test_support::root_scoped;
     use crate::workspace::{audio_wav_save, root};
     use std::fs;
+    use std::io::Cursor;
 
     #[test]
     fn a_waveform_has_one_peak_per_bucket_and_none_for_empty_audio_or_zero_bars() {
@@ -459,7 +450,7 @@ mod tests {
             .flat_map(|sample| sample.to_le_bytes())
             .collect();
 
-        let peaks = waveform_peaks_scan(samples.as_slice(), 3, 2).expect("scan");
+        let peaks = waveform_peaks_scan(Cursor::new(samples.as_slice()), 3, 2).expect("scan");
 
         assert_eq!(peaks.len(), 2);
         assert!((peaks[0] - 1.0).abs() < 1e-6);
@@ -555,7 +546,7 @@ mod tests {
     #[test]
     fn one_bar_per_sample_gives_one_peak_per_sample() {
         let samples: Vec<u8> = vec![0x00, 0x40, 0x00, 0x20];
-        let peaks = waveform_peaks_scan(samples.as_slice(), 2, 2).expect("scan");
+        let peaks = waveform_peaks_scan(Cursor::new(samples.as_slice()), 2, 2).expect("scan");
 
         assert_eq!(peaks.len(), 2);
         assert_eq!(peaks, vec![1.0, 0.5]);

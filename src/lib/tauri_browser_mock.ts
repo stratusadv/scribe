@@ -528,6 +528,9 @@ const commands = Object.freeze<Record<string, CommandHandler>>({
 
         return waveform
     },
+    job_audio_clip_get() {
+        return null
+    },
     job_audio_path_get() {
         return null
     },

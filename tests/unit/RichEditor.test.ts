@@ -14,6 +14,12 @@ const MARKDOWN = 'First paragraph\n\n- item one\n- item two'
 const mounted: VueWrapper[] = []
 
 class ResizeObserverStub {
+    static callback: ResizeObserverCallback | null = null
+
+    constructor(callback: ResizeObserverCallback) {
+        ResizeObserverStub.callback = callback
+    }
+
     observe() {
         return undefined
     }
@@ -21,6 +27,12 @@ class ResizeObserverStub {
     disconnect() {
         return undefined
     }
+}
+
+function resize(target: Element, width: number) {
+    const entry = { target, contentRect: { width } } as unknown as ResizeObserverEntry
+
+    ResizeObserverStub.callback?.([entry], {} as ResizeObserver)
 }
 
 function rewrite_handler(reply: string) {
@@ -149,6 +161,24 @@ describe('RichEditor mounting', () => {
         expect(model_emitted_last(wrapper)).toEqual([
             'Very First paragraph\n\n- item one\n- item two',
         ])
+    })
+
+    it('ignores a resize while detached and collapses the toolbar on a narrow one once attached', async () => {
+        const wrapper = await mount_editor()
+        const root = wrapper.get('.rich-editor').element
+
+        root.remove()
+        resize(root, 0)
+        await flushPromises()
+
+        expect(wrapper.find('[title="More tools"]').exists()).toBe(false)
+
+        document.body.append(root)
+        resize(root, 320)
+        await flushPromises()
+
+        expect(wrapper.find('[title="More tools"]').exists()).toBe(true)
+        expect(wrapper.get('.rich-tb-more-panel').find('[title="Strikethrough"]').exists()).toBe(true)
     })
 })
 

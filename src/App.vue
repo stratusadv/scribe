@@ -69,7 +69,9 @@ watch(update_banner_visible, () => {
 })
 
 function editor_load() {
-    void import('./components/RichEditor.vue')
+    import('./components/RichEditor.vue').catch((error: unknown) => {
+        console.warn('[app] editor prefetch failed', error)
+    })
 }
 
 function editor_prefetch() {

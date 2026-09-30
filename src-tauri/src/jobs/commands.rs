@@ -66,6 +66,33 @@ pub(crate) async fn job_audio_path_get(job_id: String) -> AppResult<Option<Strin
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub(crate) async fn job_audio_clip_get(
+    job_id: String,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> AppResult<Option<String>> {
+    if !(start_seconds >= 0.0 && end_seconds > start_seconds) {
+        return Err(AppError::Config("a clip needs a positive time range".into()));
+    }
+
+    blocking::run(move || {
+        let path_source = workspace::job_audio_path(&job_id)?;
+
+        if !path_source.exists() {
+            return Ok(None);
+        }
+
+        let path_clip = workspace::job_audio_clip_path(&job_id, start_seconds, end_seconds)?;
+
+        workspace::job_audio_clips_remove(&job_id)?;
+        workspace::audio_clip_save(&path_source, start_seconds, end_seconds, &path_clip)?;
+
+        Ok(Some(path_clip.to_string_lossy().into_owned()))
+    })
+    .await
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) async fn job_waveform_get(
     job_id: String,
     bar_count: u32,

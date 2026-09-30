@@ -1091,10 +1091,33 @@
         @apply flex gap-2;
     }
     .notes-empty {
-        @apply flex items-center justify-center;
+        @apply flex flex-col items-center justify-center text-center gap-1 px-8;
         height: 100%;
         border: 1px dashed var(--color-border-dashed);
         border-radius: var(--radius-lg);
+    }
+    .empty-badge {
+        @apply inline-flex items-center justify-center;
+        width: 5rem;
+        height: 5rem;
+        margin-bottom: 0.5rem;
+        border-radius: 9999px;
+        background-color: var(--color-field);
+        border: 1px solid var(--color-border);
+        color: var(--color-content-muted);
+    }
+    .empty-badge svg {
+        width: 2.5rem;
+        height: 2.5rem;
+    }
+    .notes-empty h3 {
+        @apply text-base font-medium;
+        margin: 0;
+    }
+    .notes-empty p {
+        @apply text-sm;
+        max-width: 28rem;
+        margin: 0;
     }
     main:has(> .app-content > .view-fill) {
         @apply flex flex-col;
@@ -1485,9 +1508,15 @@
         border: 1px solid var(--color-border);
         border-radius: var(--radius-lg);
     }
+    .file-picker-filled .empty-badge {
+        margin-bottom: 0;
+    }
+    .file-picker-replace {
+        margin-top: 0.5rem;
+    }
     .file-picker-name {
+        @apply text-base;
         max-width: 100%;
-        font-size: 0.9375rem;
         font-weight: 500;
         color: var(--color-content-strong);
         overflow: hidden;

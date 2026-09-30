@@ -20,7 +20,6 @@ interface DisplayRow {
 const ROWS_RENDER_STEP = 60
 const ROWS_RENDER_THRESHOLD_PX = 200
 const COPIED_FLASH_MS = 1500
-const BLOB_PREFIX = 'blob:'
 const HIGHLIGHT_NAME = 'transcript-filter'
 const REGEX_ESCAPE = /[.*+?^${}()|[\]\\]/g
 const { job_id_current, transcript_segments_text_set } = use_pipeline()
@@ -36,10 +35,10 @@ const index_editing = ref<number | null>(null)
 const text_editing = ref('')
 const list_ref = ref<HTMLElement | null>(null)
 const audio_ref = ref<HTMLAudioElement | null>(null)
+const audio_path = ref<string | null>(null)
 const audio_src = ref<string | null>(null)
 const audio_checked = ref(false)
 const playback_index = ref<number | null>(null)
-const playback_end_seconds = ref<number | null>(null)
 const rows_render_limit = ref(ROWS_RENDER_STEP)
 
 const rows = computed<DisplayRow[]>(() => {
@@ -209,13 +208,15 @@ async function row_edit_commit(row: DisplayRow, index: number) {
 }
 
 function audio_src_release() {
-    if (audio_src.value?.startsWith(BLOB_PREFIX)) URL.revokeObjectURL(audio_src.value)
+    if (audio_src.value) URL.revokeObjectURL(audio_src.value)
 
     audio_src.value = null
 }
 
-async function audio_src_load() {
+async function audio_path_load() {
     audio_src_release()
+
+    audio_path.value = null
 
     const id = job_id_current.value
 
@@ -226,11 +227,9 @@ async function audio_src_load() {
     }
 
     try {
-        const path = await ipc.job_audio_path_get(id)
-
-        if (path) audio_src.value = convertFileSrc(path)
+        audio_path.value = await ipc.job_audio_path_get(id)
     } catch (error) {
-        audio_src.value = null
+        audio_path.value = null
 
         console.warn('[transcript] audio path unavailable', id, error)
     } finally {
@@ -238,42 +237,36 @@ async function audio_src_load() {
     }
 }
 
-async function audio_error_fallback() {
-    const source = audio_src.value
+async function audio_clip_attach(row: DisplayRow): Promise<HTMLAudioElement | null> {
+    const id = job_id_current.value
 
-    if (!source || source.startsWith(BLOB_PREFIX)) {
-        audio_src_release()
+    if (!id) return null
+    if (row.end_seconds <= row.start_seconds) return null
 
-        return
-    }
+    audio_src_release()
 
-    try {
-        const response = await fetch(source)
+    const path = await ipc.job_audio_clip_get(id, row.start_seconds, row.end_seconds)
 
-        if (!response.ok) throw new Error(`audio fetch: ${response.status}`)
+    if (!path) return null
 
-        audio_src.value = URL.createObjectURL(await response.blob())
-    } catch (error) {
-        audio_src_release()
+    const response = await fetch(convertFileSrc(path))
 
-        console.warn('[transcript] audio fallback failed', error)
-    }
+    if (!response.ok) throw new Error(`clip fetch: ${response.status}`)
+
+    audio_src.value = URL.createObjectURL(await response.blob())
+
+    await nextTick()
+
+    return audio_ref.value
+}
+
+function audio_error_handler() {
+    playback_clear()
+    audio_src_release()
 }
 
 function playback_clear() {
     playback_index.value = null
-    playback_end_seconds.value = null
-}
-
-function audio_time_update() {
-    const audio = audio_ref.value
-
-    if (!audio) return
-    if (playback_end_seconds.value === null) return
-    if (audio.currentTime < playback_end_seconds.value) return
-
-    audio.pause()
-    playback_clear()
 }
 
 function audio_pause_handler() {
@@ -283,23 +276,22 @@ function audio_pause_handler() {
 async function row_play_toggle(row: DisplayRow, index: number, event: Event) {
     event.stopPropagation()
 
-    const audio = audio_ref.value
-
-    if (!audio || !audio_src.value) return
-
     if (playback_index.value === index) {
-        audio.pause()
+        audio_pause_if_playing()
         playback_clear()
 
         return
     }
 
-    audio.pause()
-    audio.currentTime = Math.max(0, row.start_seconds)
-    playback_end_seconds.value = row.end_seconds
-    playback_index.value = index
+    audio_pause_if_playing()
 
     try {
+        const audio = await audio_clip_attach(row)
+
+        if (!audio) return
+
+        playback_index.value = index
+
         await audio.play()
     } catch (error) {
         playback_clear()
@@ -311,7 +303,7 @@ async function row_play_toggle(row: DisplayRow, index: number, event: Event) {
 function playback_space_toggle() {
     const audio = audio_ref.value
 
-    if (!audio || !audio_src.value) return
+    if (!audio) return
 
     if (audio.paused) {
         void audio.play().catch((error: unknown) => {
@@ -331,14 +323,14 @@ function audio_pause_if_playing() {
 use_shortcuts({ space: playback_space_toggle })
 
 onMounted(() => {
-    void audio_src_load()
+    void audio_path_load()
 })
 
 watch(() => job_id_current.value, () => {
     audio_pause_if_playing()
     playback_clear()
 
-    void audio_src_load()
+    void audio_path_load()
 })
 
 onUnmounted(() => {
@@ -355,9 +347,8 @@ onUnmounted(() => {
             ref="audio_ref"
             :src="audio_src"
             preload="metadata"
-            @timeupdate="audio_time_update"
             @pause="audio_pause_handler"
-            @error="audio_error_fallback"
+            @error="audio_error_handler"
         />
         <div class="transcript-pane-header">
             <div class="text-sm font-medium">Transcript</div>
@@ -392,7 +383,7 @@ onUnmounted(() => {
             >
                 <div class="transcript-pane-actions">
                     <button
-                        v-if="audio_src"
+                        v-if="audio_path && timing_present"
                         type="button"
                         class="transcript-pane-play"
                         :title="playback_index === index ? 'Pause' : 'Play segment'"

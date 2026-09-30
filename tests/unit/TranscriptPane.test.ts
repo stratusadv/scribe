@@ -374,12 +374,11 @@ describe('TranscriptPane', () => {
         vi.unstubAllGlobals()
     })
 
-    it('renders the audio element and play buttons only when the job has audio', async () => {
+    it('renders play buttons only when the job has audio', async () => {
         const without = mount_pane()
 
         await flushPromises()
 
-        expect(without.find('audio').exists()).toBe(false)
         expect(without.findAll('.transcript-pane-play')).toHaveLength(0)
 
         vi.mocked(ipc.job_audio_path_get).mockResolvedValue('/tmp/take.wav')
@@ -388,7 +387,41 @@ describe('TranscriptPane', () => {
 
         await flushPromises()
 
-        expect(wrapper.get('audio').attributes('src')).toBe('asset:///tmp/take.wav')
+        expect(wrapper.find('audio').exists()).toBe(false)
         expect(wrapper.findAll('.transcript-pane-play')).toHaveLength(3)
+    })
+
+    it('attaches the clip for a line to the audio element only when that line is played', async () => {
+        const fetch_mock = vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(new Blob(['wav'])) })
+        const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+        const revoke = vi.spyOn(URL, 'revokeObjectURL').mockReturnValue(undefined)
+
+        vi.mocked(ipc.job_audio_path_get).mockResolvedValue('/tmp/take.wav')
+        vi.mocked(ipc.job_audio_clip_get).mockResolvedValue('/tmp/clip.wav')
+        vi.stubGlobal('fetch', fetch_mock)
+        vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:clip')
+
+        const wrapper = mount_pane()
+
+        await flushPromises()
+
+        expect(wrapper.find('audio').exists()).toBe(false)
+
+        await wrapper.get('.transcript-pane-play').trigger('click')
+        await flushPromises()
+
+        expect(ipc.job_audio_clip_get).toHaveBeenCalledWith('job-1', expect.any(Number), expect.any(Number))
+        expect(fetch_mock).toHaveBeenCalledWith('asset:///tmp/clip.wav')
+        expect(wrapper.get('audio').attributes('src')).toBe('blob:clip')
+        expect(play).toHaveBeenCalledOnce()
+        expect(wrapper.get('.transcript-pane-row').attributes('data-playing')).toBe('true')
+
+        await wrapper.get('audio').trigger('error')
+
+        expect(wrapper.find('audio').exists()).toBe(false)
+        expect(wrapper.get('.transcript-pane-row').attributes('data-playing')).toBe('false')
+        expect(revoke).toHaveBeenCalledWith('blob:clip')
+
+        vi.unstubAllGlobals()
     })
 })
