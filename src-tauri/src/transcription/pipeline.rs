@@ -28,7 +28,7 @@ pub(crate) fn audio_prepare_blocking(source_path: &Path) -> AppResult<(String, P
     let source_metadata = std::fs::metadata(source_path)?;
     let existing = workspace::meta_load(&job_id)?;
 
-    debug_assert!(!job_id.is_empty());
+    debug_assert_ne!(job_id, "");
 
     let label = source_path
         .file_name()
@@ -79,6 +79,7 @@ fn audio_prepare_meta(
             project: None,
             tags: Vec::new(),
             favourite: false,
+            speaker_links: Vec::new(),
         },
         Some(previous) => JobMeta {
             id: job_id.to_owned(),
@@ -94,6 +95,7 @@ fn audio_prepare_meta(
             project: previous.project,
             tags: previous.tags,
             favourite: previous.favourite,
+            speaker_links: previous.speaker_links,
         },
     };
 
@@ -114,6 +116,7 @@ pub(crate) async fn transcribe_remote_async(
     source_path: &Path,
     endpoint_id: &str,
     transcript_reuse: bool,
+    speakers_dir: Option<PathBuf>,
     progress: Option<TranscribeProgress>,
 ) -> AppResult<TranscriptionResult> {
     let endpoint = endpoint_load(endpoint_id)?;
@@ -155,10 +158,16 @@ pub(crate) async fn transcribe_remote_async(
 
     let spelling_hint = transcribe_remote_spelling_hint();
 
-    let transcript =
-        transcribe_audio_file(&audio_path, &endpoint, &spelling_hint, progress.as_ref()).await?;
+    let transcript = transcribe_audio_file(
+        &audio_path,
+        &endpoint,
+        &spelling_hint,
+        speakers_dir.as_deref(),
+        progress.as_ref(),
+    )
+    .await?;
 
-    debug_assert!(!job_id.is_empty());
+    debug_assert_ne!(job_id, "");
 
     workspace::transcript_save(&job_id, &engine_id, &transcript)?;
 
@@ -221,7 +230,7 @@ fn spelling_hint_build(people: &[Person]) -> String {
 }
 
 async fn transcribe_remote_title_apply(job_id: &str, transcript_text: &str) {
-    debug_assert!(!job_id.is_empty());
+    debug_assert_ne!(job_id, "");
 
     let mut meta = match workspace::meta_load(job_id) {
         Ok(Some(meta)) => meta,
@@ -250,7 +259,7 @@ async fn transcribe_remote_title_apply(job_id: &str, transcript_text: &str) {
         }
     };
 
-    debug_assert!(!title.is_empty());
+    debug_assert_ne!(title, "");
 
     meta = match workspace::meta_load(job_id) {
         Ok(Some(meta)) => meta,
@@ -313,7 +322,7 @@ pub(crate) fn transcript_import_blocking(
         segments: transcript_import_segments(trimmed),
     };
 
-    debug_assert!(!transcript.segments.is_empty());
+    debug_assert_ne!(transcript.segments.len(), 0);
 
     workspace::transcript_save(&job_id, ENGINE_ID_IMPORTED, &transcript)?;
 
@@ -330,7 +339,7 @@ fn transcript_import_meta(
     title_clean: Option<String>,
     existing: Option<JobMeta>,
 ) -> JobMeta {
-    debug_assert!(!trimmed.is_empty());
+    debug_assert_ne!(trimmed, "");
 
     let source_size_bytes = trimmed.len() as u64;
 
@@ -353,6 +362,7 @@ fn transcript_import_meta(
             project: None,
             tags: Vec::new(),
             favourite: false,
+            speaker_links: Vec::new(),
         },
         Some(previous) => JobMeta {
             id: job_id.to_owned(),
@@ -368,6 +378,7 @@ fn transcript_import_meta(
             project: previous.project,
             tags: previous.tags,
             favourite: previous.favourite,
+            speaker_links: previous.speaker_links,
         },
     };
 
@@ -378,7 +389,7 @@ fn transcript_import_meta(
 }
 
 fn transcript_import_segments(trimmed: &str) -> Vec<TranscriptSegment> {
-    debug_assert!(!trimmed.is_empty());
+    debug_assert_ne!(trimmed, "");
 
     let segments: Vec<TranscriptSegment> = trimmed
         .split('\n')
@@ -388,6 +399,7 @@ fn transcript_import_segments(trimmed: &str) -> Vec<TranscriptSegment> {
             text: line.to_owned(),
             start_seconds: 0.0,
             end_seconds: 0.0,
+            speaker: None,
         })
         .collect();
 
@@ -396,6 +408,7 @@ fn transcript_import_segments(trimmed: &str) -> Vec<TranscriptSegment> {
             text: trimmed.to_owned(),
             start_seconds: 0.0,
             end_seconds: 0.0,
+            speaker: None,
         }];
     }
 
@@ -603,10 +616,13 @@ mod tests {
 
         let started = std::time::Instant::now();
 
+        let speakers_dir = std::env::var("SCRIBE_MANUAL_SPEAKERS").ok().map(PathBuf::from);
+
         let result = runtime.block_on(transcribe_remote_async(
             Path::new(&audio),
             &endpoint_id,
             false,
+            speakers_dir,
             None,
         ));
 

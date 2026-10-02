@@ -165,7 +165,7 @@ async fn markdown_render_html(markdown: String) -> AppResult<String> {
 }
 
 fn window_event_handle(window: &tauri::Window, event: &WindowEvent) {
-    debug_assert!(!window.label().is_empty());
+    debug_assert_ne!(window.label(), "");
 
     if window.label() != WINDOW_LABEL_MAIN { return; }
 
@@ -195,8 +195,6 @@ fn realtime_cpu_limit_soften() {
     );
 }
 
-// tigerstyle-ignore: TS020
-#[expect(clippy::exit, reason = "the exit call lives inside tauri::generate_context!")]
 pub fn run() {
     tracing_initialize();
 

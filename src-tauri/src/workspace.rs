@@ -55,6 +55,14 @@ pub(crate) struct JobMeta {
     pub(crate) tags: Vec<String>,
     #[serde(default)]
     pub(crate) favourite: bool,
+    #[serde(default)]
+    pub(crate) speaker_links: Vec<SpeakerLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SpeakerLink {
+    pub(crate) speaker: u16,
+    pub(crate) person_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +90,8 @@ pub(crate) struct JobMetaPatch {
     pub(crate) tags: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) favourite: Option<bool>,
+    #[serde(default)]
+    pub(crate) speaker_links: Option<Vec<SpeakerLink>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,6 +99,30 @@ pub(crate) struct JobSearchHit {
     pub(crate) job_id: String,
     pub(crate) source: String,
     pub(crate) snippet: String,
+}
+
+fn speaker_links_clean(links: Vec<SpeakerLink>) -> Vec<SpeakerLink> {
+    let mut cleaned: Vec<SpeakerLink> = Vec::with_capacity(links.len());
+
+    for link in links {
+        let person_id = link.person_id.trim();
+
+        if person_id.is_empty() {
+            continue;
+        }
+
+        if cleaned.iter().any(|kept| kept.speaker == link.speaker) {
+            continue;
+        }
+
+        cleaned.push(SpeakerLink { speaker: link.speaker, person_id: person_id.to_owned() });
+    }
+
+    cleaned.sort_by_key(|link| link.speaker);
+
+    debug_assert!(cleaned.is_sorted_by_key(|link| link.speaker));
+
+    cleaned
 }
 
 pub(crate) fn meta_apply_patch(id: &str, patch: JobMetaPatch) -> AppResult<JobMeta> {
@@ -128,6 +162,10 @@ pub(crate) fn meta_apply_patch(id: &str, patch: JobMetaPatch) -> AppResult<JobMe
 
     if let Some(favourite) = patch.favourite {
         meta.favourite = favourite;
+    }
+
+    if let Some(speaker_links) = patch.speaker_links {
+        meta.speaker_links = speaker_links_clean(speaker_links);
     }
 
     debug_assert_eq!(meta.id, id);
@@ -213,7 +251,7 @@ pub(crate) fn root() -> AppResult<PathBuf> {
 }
 
 pub(crate) fn root_file_path(file_name: &str) -> AppResult<PathBuf> {
-    debug_assert!(!file_name.is_empty());
+    debug_assert_ne!(file_name, "");
     debug_assert!(!file_name.contains(['/', '\\']));
 
     let directory = root()?;
@@ -387,7 +425,7 @@ pub(crate) fn meta_load(id: &str) -> AppResult<Option<JobMeta>> {
 
     let meta: JobMeta = serde_json::from_str(&file_read_bounded(&path, META_BYTES_MAX)?)?;
 
-    debug_assert!(!meta.id.is_empty());
+    debug_assert_ne!(meta.id, "");
 
     Ok(Some(meta))
 }
@@ -673,7 +711,7 @@ pub(crate) fn jobs_search_all(query: &str) -> AppResult<Vec<JobSearchHit>> {
 }
 
 fn search_job(job: &JobMeta, needle: &str) -> AppResult<Option<JobSearchHit>> {
-    debug_assert!(!needle.is_empty());
+    debug_assert_ne!(needle, "");
     debug_assert_eq!(needle, needle.to_lowercase());
 
     let title = job.title.as_deref().or(job.label.as_deref()).unwrap_or("");
@@ -711,7 +749,7 @@ fn search_job(job: &JobMeta, needle: &str) -> AppResult<Option<JobSearchHit>> {
 }
 
 fn search_snippet(haystack: &str, needle: &str) -> Option<String> {
-    debug_assert!(!needle.is_empty());
+    debug_assert_ne!(needle, "");
 
     let line = haystack
         .lines()
@@ -726,7 +764,7 @@ fn search_snippet(haystack: &str, needle: &str) -> Option<String> {
 }
 
 fn search_snippet_window(line: &str, needle: &str) -> String {
-    debug_assert!(!needle.is_empty());
+    debug_assert_ne!(needle, "");
     debug_assert!(line.chars().count() > SNIPPET_CHARS_MAX as usize);
 
     let lowered = line.to_lowercase();
@@ -793,7 +831,7 @@ fn jobs_list_entry_load(meta_path: &Path) -> AppResult<JobMeta> {
     let raw = file_read_bounded(meta_path, META_BYTES_MAX)?;
     let meta: JobMeta = serde_json::from_str(&raw)?;
 
-    debug_assert!(!meta.id.is_empty());
+    debug_assert_ne!(meta.id, "");
 
     Ok(meta)
 }
@@ -992,6 +1030,7 @@ pub(crate) mod test_support {
             project: None,
             tags: Vec::new(),
             favourite: false,
+            speaker_links: Vec::new(),
         }
     }
 }
@@ -1009,6 +1048,7 @@ mod tests {
                 text: text.to_owned(),
                 start_seconds: 0.0,
                 end_seconds: 1.0,
+                speaker: None,
             }],
         }
     }
@@ -1055,7 +1095,7 @@ mod tests {
         let patch: JobMetaPatch = serde_json::from_str("{}").unwrap();
 
         assert!(meta.title.is_none());
-        assert!(meta.attendees.is_empty());
+        assert_eq!(meta.attendees.len(), 0);
         assert!(!meta.favourite);
         assert!(patch.title.is_none());
         assert!(patch.favourite.is_none());
@@ -1100,7 +1140,7 @@ mod tests {
         let _root = root_scoped("transcript-round-trip");
         let id = job_id_from_text("transcript");
 
-        assert!(engines_for_job(&id).unwrap().is_empty());
+        assert_eq!(engines_for_job(&id).unwrap().len(), 0);
         assert!(transcript_load::<Transcript>(&id, "remote-a").unwrap().is_none());
 
         transcript_save(&id, "remote-b", &transcript_with("second")).unwrap();
@@ -1275,7 +1315,7 @@ mod tests {
 
         assert_eq!(found, expected);
         assert_eq!(hits[1].snippet, "The rollout slipped.");
-        assert!(jobs_search_all("absent").unwrap().is_empty());
+        assert_eq!(jobs_search_all("absent").unwrap().len(), 0);
     }
 
     #[test]
@@ -1376,7 +1416,7 @@ mod tests {
 
         assert_eq!(names_clean(names), vec!["b".to_owned(), "a".to_owned(), "a".to_owned()]);
         assert_eq!(ids_clean(ids), vec!["b".to_owned(), "a".to_owned()]);
-        assert!(names_clean(Vec::new()).is_empty());
+        assert_eq!(names_clean(Vec::new()).len(), 0);
     }
 
     #[test]
@@ -1404,7 +1444,7 @@ mod tests {
 
         assert_eq!(snippet, "The Rollout plan is on this line.");
         assert!(search_snippet(haystack, "missing").is_none());
-        assert!(jobs_search_all("   ").expect("empty query").is_empty());
+        assert_eq!(jobs_search_all("   ").expect("empty query").len(), 0);
     }
 
     #[test]

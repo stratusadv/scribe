@@ -58,6 +58,8 @@
         --color-primary-hover: color-mix(in oklab, var(--color-primary), var(--shade) 8%);
         --color-primary-active: color-mix(in oklab, var(--color-primary), var(--shade) 15%);
         --color-accent: oklch(66% 0.14 225);
+        --color-accent-alt: oklch(72% 0.13 300);
+        --color-teal: #5eead4;
         --color-accent-hover: color-mix(in oklab, var(--color-accent), var(--lift) 10%);
         --color-accent-strong: color-mix(in oklab, var(--color-accent), var(--lift) 22%);
         --color-accent-soft: color-mix(in oklab, var(--color-accent) 20%, transparent);
@@ -98,6 +100,8 @@
         --color-primary: #c4a7e7;
         --color-primary-content: #191724;
         --color-accent: #c4a7e7;
+        --color-accent-alt: #ebbcba;
+        --color-teal: #3e8fb0;
         --color-online: #9ccfd8;
         --color-danger-text: #eb6f92;
         --color-danger-content: #eb6f92;
@@ -116,6 +120,8 @@
         --color-primary: #cba6f7;
         --color-primary-content: #1e1e2e;
         --color-accent: #cba6f7;
+        --color-accent-alt: #f5c2e7;
+        --color-teal: #94e2d5;
         --color-online: #a6e3a1;
         --color-danger-text: #f38ba8;
         --color-danger-content: #f38ba8;
@@ -134,6 +140,8 @@
         --color-primary: #88c0d0;
         --color-primary-content: #2e3440;
         --color-accent: #88c0d0;
+        --color-accent-alt: #b48ead;
+        --color-teal: #8fbcbb;
         --color-online: #a3be8c;
         --color-danger-text: #f9959d;
         --color-danger-content: #e49ca3;
@@ -152,6 +160,8 @@
         --color-primary: #fe8019;
         --color-primary-content: #1d2021;
         --color-accent: #fe8019;
+        --color-accent-alt: #d3869b;
+        --color-teal: #8ec07c;
         --color-online: #b8bb26;
         --color-danger-text: #ff543e;
         --color-danger-content: #ff543e;
@@ -170,6 +180,8 @@
         --color-primary: #7aa2f7;
         --color-primary-content: #1a1b26;
         --color-accent: #7aa2f7;
+        --color-accent-alt: #bb9af7;
+        --color-teal: #73daca;
         --color-online: #9ece6a;
         --color-danger-text: #f7768e;
         --color-danger-content: #f7768e;
@@ -188,6 +200,8 @@
         --color-primary: #4385be;
         --color-primary-content: #100f0f;
         --color-accent: #4385be;
+        --color-accent-alt: #8b7ec8;
+        --color-teal: #3aa99f;
         --color-online: #879a39;
         --color-danger-text: #d25247;
         --color-danger-content: #d25247;
@@ -206,6 +220,8 @@
         --color-primary: #e6b450;
         --color-primary-content: #0b0e14;
         --color-accent: #59c2ff;
+        --color-accent-alt: #d2a6ff;
+        --color-teal: #95e6cb;
         --color-online: #aad94c;
         --color-danger-text: #d95757;
         --color-danger-content: #d95757;
@@ -224,6 +240,8 @@
         --color-primary: #bd93f9;
         --color-primary-content: #21222c;
         --color-accent: #8be9fd;
+        --color-accent-alt: #ff79c6;
+        --color-teal: #a4ffff;
         --color-online: #50fa7b;
         --color-danger-text: #ff5555;
         --color-danger-content: #ff5555;
@@ -242,6 +260,8 @@
         --color-primary: #61afef;
         --color-primary-content: #21252b;
         --color-accent: #61afef;
+        --color-accent-alt: #c678dd;
+        --color-teal: #56b6c2;
         --color-online: #98c379;
         --color-danger-text: #e06c75;
         --color-danger-content: #e06c75;
@@ -260,6 +280,8 @@
         --color-primary: #84a0c6;
         --color-primary-content: #161821;
         --color-accent: #84a0c6;
+        --color-accent-alt: #a093c7;
+        --color-teal: #89b8c2;
         --color-online: #b4be82;
         --color-danger-text: #e27878;
         --color-danger-content: #e27878;
@@ -278,6 +300,8 @@
         --color-primary: #719cd6;
         --color-primary-content: #131a24;
         --color-accent: #719cd6;
+        --color-accent-alt: #9d79d6;
+        --color-teal: #63cdcf;
         --color-online: #81b29a;
         --color-danger-text: #ce5e79;
         --color-danger-content: #ce5e79;
@@ -296,6 +320,8 @@
         --color-primary: #82aaff;
         --color-primary-content: #011627;
         --color-accent: #82aaff;
+        --color-accent-alt: #c792ea;
+        --color-teal: #7fdbca;
         --color-online: #addb67;
         --color-danger-text: #ef5350;
         --color-danger-content: #ef5350;
@@ -326,6 +352,8 @@
         --color-primary: #141414;
         --color-primary-content: #ffffff;
         --color-accent: oklch(52% 0.14 225);
+        --color-accent-alt: oklch(50% 0.15 300);
+        --color-teal: #0f766e;
         --color-accent-content: #ffffff;
         --color-accent-soft: color-mix(in oklab, var(--color-accent) 14%, transparent);
         --color-focus-ring: color-mix(in oklab, var(--color-accent) 50%, transparent);
@@ -356,6 +384,8 @@
         --color-primary: #7b6693;
         --color-primary-content: #ffffff;
         --color-accent: #7b6693;
+        --color-accent-alt: #d7827e;
+        --color-teal: #286983;
         --color-online: #56949f;
         --color-danger-text: #a4546b;
         --color-danger-content: #a4546b;
@@ -374,6 +404,8 @@
         --color-primary: #8535eb;
         --color-primary-content: #ffffff;
         --color-accent: #8535eb;
+        --color-accent-alt: #ea76cb;
+        --color-teal: #179299;
         --color-online: #40a02b;
         --color-danger-text: #ce0436;
         --color-danger-content: #ce0436;
@@ -392,6 +424,8 @@
         --color-primary: #476993;
         --color-primary-content: #ffffff;
         --color-accent: #476993;
+        --color-accent-alt: #9a6a92;
+        --color-teal: #4c8b8b;
         --color-online: #7b9a5c;
         --color-danger-text: #a9444f;
         --color-danger-content: #a9444f;
@@ -410,6 +444,8 @@
         --color-primary: #af3a03;
         --color-primary-content: #fbf1c7;
         --color-accent: #af3a03;
+        --color-accent-alt: #8f3f71;
+        --color-teal: #427b58;
         --color-online: #79740e;
         --color-danger-text: #9d0006;
         --color-danger-content: #9d0006;
@@ -428,6 +464,8 @@
         --color-primary: #015ec7;
         --color-primary-content: #ffffff;
         --color-accent: #015ec7;
+        --color-accent-alt: #7847bd;
+        --color-teal: #387068;
         --color-online: #587539;
         --color-danger-text: #c50041;
         --color-danger-content: #b53235;
@@ -446,6 +484,8 @@
         --color-primary: #205ea6;
         --color-primary-content: #fffcf0;
         --color-accent: #205ea6;
+        --color-accent-alt: #5e409d;
+        --color-teal: #24837b;
         --color-online: #66800b;
         --color-danger-text: #af3029;
         --color-danger-content: #af3029;
@@ -464,6 +504,8 @@
         --color-primary: #1a6fb0;
         --color-primary-content: #ffffff;
         --color-accent: #1a6fb0;
+        --color-accent-alt: #a37acc;
+        --color-teal: #2e9c7f;
         --color-online: #86b300;
         --color-danger-text: #c64646;
         --color-danger-content: #c64646;
@@ -482,6 +524,8 @@
         --color-primary: #644ac9;
         --color-primary-content: #fffbeb;
         --color-accent: #036a96;
+        --color-accent-alt: #a3144d;
+        --color-teal: #0f7a7a;
         --color-online: #14710a;
         --color-danger-text: #cb3a2a;
         --color-danger-content: #cb3a2a;
@@ -500,6 +544,8 @@
         --color-primary: #2a5bcc;
         --color-primary-content: #ffffff;
         --color-accent: #2a5bcc;
+        --color-accent-alt: #a626a4;
+        --color-teal: #0184bc;
         --color-online: #50a14f;
         --color-danger-text: #c44b3f;
         --color-danger-content: #c44b3f;
@@ -518,6 +564,8 @@
         --color-primary: #2d539e;
         --color-primary-content: #e8e9ec;
         --color-accent: #2d539e;
+        --color-accent-alt: #7759b4;
+        --color-teal: #3f83a6;
         --color-online: #668e3d;
         --color-danger-text: #aa4566;
         --color-danger-content: #aa4566;
@@ -536,6 +584,8 @@
         --color-primary: #2848a9;
         --color-primary-content: #f6f2ee;
         --color-accent: #2848a9;
+        --color-accent-alt: #6e33ce;
+        --color-teal: #287980;
         --color-online: #396847;
         --color-danger-text: #a5222f;
         --color-danger-content: #a5222f;
@@ -554,6 +604,8 @@
         --color-primary: #3a63bf;
         --color-primary-content: #fbfbfb;
         --color-accent: #3a63bf;
+        --color-accent-alt: #994cc3;
+        --color-teal: #08916a;
         --color-online: #2aa298;
         --color-danger-text: #d13937;
         --color-danger-content: #d13937;
@@ -1536,6 +1588,31 @@
     @keyframes mic-dot-pulse {
         50% { opacity: 0.35; }
     }
+    .meeting-speakers {
+        @apply grid gap-4 mt-2;
+        grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+    }
+    .meeting-speaker {
+        @apply flex flex-col gap-4 p-4;
+        border: 1px solid var(--color-border);
+        border-radius: var(--radius-md);
+        background-color: var(--color-field);
+    }
+    .meeting-speaker-head {
+        @apply flex items-center justify-between gap-3;
+    }
+    .meeting-speaker-label {
+        @apply text-sm;
+    }
+    .meeting-speaker-actions {
+        @apply flex items-center gap-3;
+    }
+    .meeting-speaker-actions .search-select {
+        @apply flex-1;
+    }
+    .meeting-speaker-actions .btn-default {
+        white-space: nowrap;
+    }
     .meeting-details-people {
         display: flex;
         flex-wrap: wrap;
@@ -1577,6 +1654,18 @@
     .tag-chip-remove:hover {
         background-color: var(--color-elevated-hover);
         color: var(--color-content);
+    }
+    .tag-chip-person {
+        background-color: transparent;
+        box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--color-teal) 60%, transparent);
+        color: var(--color-teal);
+    }
+    .tag-chip-person .tag-chip-remove {
+        color: var(--color-teal);
+    }
+    .tag-chip-person .tag-chip-remove:hover {
+        background-color: color-mix(in oklab, var(--color-teal) 15%, transparent);
+        color: var(--color-teal);
     }
 
     .notes-split {
@@ -2049,6 +2138,9 @@
         @apply text-xs;
         color: var(--color-content-subtle);
     }
+    .transcript-pane-row-speaker {
+        @apply text-xs;
+    }
     .transcript-pane-actions {
         @apply flex items-center gap-1 shrink-0;
     }
@@ -2313,6 +2405,13 @@
     .people-form-dialog {
         max-width: 34rem;
     }
+    .speaker-lines {
+        max-width: 72rem;
+        height: 90vh;
+    }
+    .speaker-lines-transcript {
+        @apply flex-1 min-h-0 mt-3;
+    }
     .people-picker-body {
         @apply flex flex-col flex-1 min-h-0;
     }
@@ -2391,7 +2490,24 @@
         background-color: var(--color-row-hover);
         outline: none;
     }
-    .menu-item-icon {
+    .search-select {
+        @apply relative;
+    }
+    .search-select-list {
+        left: 0;
+        right: 0;
+        max-height: 16rem;
+        overflow-y: auto;
+    }
+    .search-select-list .menu-item {
+        flex-shrink: 0;
+    }
+    .search-select-list .menu-item[data-active="true"] {
+        background-color: var(--color-row-hover);
+    }
+    .search-select-list .menu-item[aria-selected="true"] {
+        color: var(--search-select-color, var(--color-accent));
+    }    .menu-item-icon {
         width: 1rem;
         height: 1rem;
         flex-shrink: 0;

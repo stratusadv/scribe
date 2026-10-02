@@ -3,7 +3,12 @@ use super::types::TranscribeProgress;
 use crate::blocking;
 use crate::cancellation::stream_id_validate;
 use crate::error::AppResult;
+use crate::settings::settings_load;
 use std::path::PathBuf;
+use tauri::Manager;
+use tauri::path::BaseDirectory;
+
+const SPEAKERS_RESOURCE_DIR: &str = "resources/speakers";
 
 #[tauri::command(rename_all = "snake_case")]
 pub(crate) async fn transcription_remote(
@@ -19,12 +24,55 @@ pub(crate) async fn transcription_remote(
 
     let source_path = PathBuf::from(audio_path);
 
+    let speakers_dir = speakers_dir_resolve(&app);
+
     let progress = stream_id.map(|id| TranscribeProgress {
         app: app.clone(),
         stream_id: id,
     });
 
-    transcribe_remote_async(&source_path, &endpoint_id, transcript_reuse, progress).await
+    transcribe_remote_async(
+        &source_path,
+        &endpoint_id,
+        transcript_reuse,
+        speakers_dir,
+        progress,
+    )
+    .await
+}
+
+fn speakers_dir_resolve(app: &tauri::AppHandle) -> Option<PathBuf> {
+    let enabled = settings_load()
+        .ok()
+        .and_then(|settings| settings.speakers)
+        .unwrap_or(true);
+
+    if !enabled {
+        return None;
+    }
+
+    let resolved = app.path().resolve(SPEAKERS_RESOURCE_DIR, BaseDirectory::Resource);
+
+    match resolved {
+        Ok(dir) if dir.is_dir() => Some(dir),
+        Ok(dir) => {
+            tracing::warn!(
+                target: "scribe_lib::transcription",
+                "speaker models missing at {}; transcribing without speakers",
+                dir.display()
+            );
+
+            None
+        }
+        Err(error) => {
+            tracing::warn!(
+                target: "scribe_lib::transcription",
+                "speaker models unresolved: {error}; transcribing without speakers"
+            );
+
+            None
+        }
+    }
 }
 
 #[tauri::command(rename_all = "snake_case")]
