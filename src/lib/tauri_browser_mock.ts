@@ -80,6 +80,7 @@ function settings_seed(): Settings {
         notes_thinking: null,
         api_host: null,
         jobs_view: null,
+    speakers: null,
     }
 }
 
@@ -203,6 +204,7 @@ function jobs_seed(): JobMeta[] {
             project: 'scribe',
             tags: ['meeting-notes', 'platform'],
             favourite: true,
+            speaker_links: [],
         },
         {
             id: JOB_ID_SAMPLE_SECOND,
@@ -218,6 +220,7 @@ function jobs_seed(): JobMeta[] {
             project: null,
             tags: [],
             favourite: false,
+            speaker_links: [],
         },
     ]
 }
@@ -769,6 +772,7 @@ function transcript_build(lines: string[]): Transcript {
         text,
         start_seconds: index * SECONDS_PER_LINE,
         end_seconds: (index + 1) * SECONDS_PER_LINE,
+        speaker: index % 2,
     }))
 
     return { text: lines.join(' '), segments }

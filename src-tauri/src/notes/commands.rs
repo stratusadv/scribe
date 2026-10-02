@@ -797,6 +797,7 @@ mod tests {
             project: Some("Website".to_owned()),
             tags: vec!["weekly".to_owned()],
             favourite: false,
+            speaker_links: Vec::new(),
         };
 
         let people = vec![

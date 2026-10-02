@@ -15,6 +15,8 @@ import { openPath } from '@tauri-apps/plugin-opener'
 import { use_dialog } from '../composables/use_dialog'
 import { ipc } from '../lib/ipc'
 import { seconds_to_clock } from '../lib/duration'
+import { speaker_name } from '../lib/speakers'
+import { use_people } from '../composables/use_people'
 import { error_dialog_show } from '../lib/errors'
 import { path_file_stem } from '../lib/paths'
 import { use_pipeline } from '../composables/use_pipeline'
@@ -64,6 +66,7 @@ const {
 
 const { confirm: dialog_confirm, message: dialog_message } = use_dialog()
 const { endpoints_by_purpose } = use_endpoints()
+const { person_by_id } = use_people()
 const { notes_ready } = use_service()
 const { online } = use_network()
 const { task_run } = use_tasks()
@@ -116,7 +119,11 @@ function transcript_with_timestamps_text(source: Transcript): string {
 
         if (text.length === 0) continue
 
-        lines.push(`[${seconds_to_clock(segment.start_seconds)}] ${text}`)
+        const who = segment.speaker === null
+            ? ''
+            : `${speaker_name(segment.speaker, meta_current.value?.speaker_links ?? [], person_by_id)}: `
+
+        lines.push(`[${seconds_to_clock(segment.start_seconds)}] ${who}${text}`)
     }
 
     if (lines.length === 0) return source.text

@@ -48,7 +48,10 @@
       "appimage": {
         "bundleMediaFramework": true
       }
-    }
+    },
+    "resources": [
+      "resources/speakers/*"
+    ]
   },
   "plugins": {
     "updater": {

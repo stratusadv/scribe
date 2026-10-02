@@ -79,6 +79,7 @@ fn audio_prepare_meta(
             project: None,
             tags: Vec::new(),
             favourite: false,
+            speaker_links: Vec::new(),
         },
         Some(previous) => JobMeta {
             id: job_id.to_owned(),
@@ -94,6 +95,7 @@ fn audio_prepare_meta(
             project: previous.project,
             tags: previous.tags,
             favourite: previous.favourite,
+            speaker_links: previous.speaker_links,
         },
     };
 
@@ -114,6 +116,7 @@ pub(crate) async fn transcribe_remote_async(
     source_path: &Path,
     endpoint_id: &str,
     transcript_reuse: bool,
+    speakers_dir: Option<PathBuf>,
     progress: Option<TranscribeProgress>,
 ) -> AppResult<TranscriptionResult> {
     let endpoint = endpoint_load(endpoint_id)?;
@@ -155,8 +158,14 @@ pub(crate) async fn transcribe_remote_async(
 
     let spelling_hint = transcribe_remote_spelling_hint();
 
-    let transcript =
-        transcribe_audio_file(&audio_path, &endpoint, &spelling_hint, progress.as_ref()).await?;
+    let transcript = transcribe_audio_file(
+        &audio_path,
+        &endpoint,
+        &spelling_hint,
+        speakers_dir.as_deref(),
+        progress.as_ref(),
+    )
+    .await?;
 
     debug_assert!(!job_id.is_empty());
 
@@ -353,6 +362,7 @@ fn transcript_import_meta(
             project: None,
             tags: Vec::new(),
             favourite: false,
+            speaker_links: Vec::new(),
         },
         Some(previous) => JobMeta {
             id: job_id.to_owned(),
@@ -368,6 +378,7 @@ fn transcript_import_meta(
             project: previous.project,
             tags: previous.tags,
             favourite: previous.favourite,
+            speaker_links: previous.speaker_links,
         },
     };
 
@@ -388,6 +399,7 @@ fn transcript_import_segments(trimmed: &str) -> Vec<TranscriptSegment> {
             text: line.to_owned(),
             start_seconds: 0.0,
             end_seconds: 0.0,
+            speaker: None,
         })
         .collect();
 
@@ -396,6 +408,7 @@ fn transcript_import_segments(trimmed: &str) -> Vec<TranscriptSegment> {
             text: trimmed.to_owned(),
             start_seconds: 0.0,
             end_seconds: 0.0,
+            speaker: None,
         }];
     }
 
@@ -603,10 +616,13 @@ mod tests {
 
         let started = std::time::Instant::now();
 
+        let speakers_dir = std::env::var("SCRIBE_MANUAL_SPEAKERS").ok().map(PathBuf::from);
+
         let result = runtime.block_on(transcribe_remote_async(
             Path::new(&audio),
             &endpoint_id,
             false,
+            speakers_dir,
             None,
         ));
 

@@ -8,6 +8,7 @@ import {
     recording_open,
     step_current,
     tiles,
+    transcript_rows,
 } from './helpers'
 import type { Page } from '@playwright/test'
 
@@ -42,7 +43,7 @@ test('the existing meeting shows its people, template, and title', async ({ page
     await page.getByRole('button', { name: 'Meeting' }).click()
 
     await expect(page.getByLabel('Title')).toHaveValue(RECORDING_TITLED)
-    await expect(page.getByLabel('Template')).toHaveValue('default-meeting-notes')
+    await expect(page.getByLabel('Template')).toHaveValue('Meeting notes')
     await expect(chips(page, 'In the meeting')).toHaveText([
         'John Doe (Developer)',
         'Jane Doe (Product owner)',
@@ -166,16 +167,40 @@ test('the picker adds mentioned people', async ({ page }) => {
     await expect(chips(page, 'Mentioned')).toHaveCount(0)
 })
 
+test('a speaker can be assigned to a saved person and the transcript shows the name', async ({ page }) => {
+    await recording_open(page, RECORDING_TITLED)
+    await page.getByRole('button', { name: 'Meeting' }).click()
+
+    const speakers = people_field(page, 'Speakers')
+
+    await expect(speakers.locator('.meeting-speaker-label')).toHaveText(['Speaker A', 'Speaker B'])
+    await expect(chips(page, 'In the meeting')).toHaveCount(2)
+
+    await page.getByLabel('Who is Speaker A').fill('sam')
+    await page.getByRole('option', { name: 'Sam Smith (Client)' }).click()
+
+    await expect(chips(page, 'In the meeting')).toHaveCount(3)
+    await expect(chips(page, 'In the meeting').last()).toContainText('Sam Smith')
+
+    await page.getByRole('button', { name: 'Transcript', exact: true }).click()
+
+    await expect(transcript_rows(page).first().locator('.transcript-pane-row-speaker'))
+        .toHaveText('Sam Smith')
+    await expect(transcript_rows(page).nth(1).locator('.transcript-pane-row-speaker'))
+        .toHaveText('Speaker B')
+})
+
 test('the template select changes the template and Next opens Notes', async ({ page }) => {
     await recording_open(page, RECORDING_UNTITLED)
 
     const template = page.getByLabel('Template')
 
-    await expect(template).toHaveValue('default-meeting-notes')
+    await expect(template).toHaveValue('Meeting notes')
 
-    await template.selectOption({ label: 'Stand-up digest' })
+    await template.fill('stand')
+    await page.getByRole('option', { name: 'Stand-up digest' }).click()
 
-    await expect(template).toHaveValue('default-standup')
+    await expect(template).toHaveValue('Stand-up digest')
 
     await page.getByRole('button', { name: 'Next' }).click()
 
@@ -184,7 +209,7 @@ test('the template select changes the template and Next opens Notes', async ({ p
     await page.getByRole('button', { name: 'Back' }).click()
 
     await expect(step_current(page)).toHaveText('Meeting')
-    await expect(template).toHaveValue('default-standup')
+    await expect(template).toHaveValue('Stand-up digest')
 })
 
 test('Back returns to the Transcript step', async ({ page }) => {
