@@ -45,20 +45,20 @@ pub(crate) struct TranscribeProgress {
 
 impl TranscribeProgress {
     pub(crate) fn cancel_clear(&self) {
-        debug_assert!(!self.stream_id.is_empty());
+        debug_assert_ne!(self.stream_id, "");
 
         self.app.state::<AppState>().cancellation.clear(&self.stream_id);
     }
 
     pub(crate) fn cancel_register(&self) -> Arc<AtomicBool> {
-        debug_assert!(!self.stream_id.is_empty());
+        debug_assert_ne!(self.stream_id, "");
 
         self.app.state::<AppState>().cancellation.register(&self.stream_id)
     }
 
     pub(crate) fn emit_stage(&self, stage: &str) {
-        debug_assert!(!stage.is_empty());
-        debug_assert!(!self.stream_id.is_empty());
+        debug_assert_ne!(stage, "");
+        debug_assert_ne!(self.stream_id, "");
 
         let chunk = StageChunk {
             stream_id: self.stream_id.clone(),

@@ -429,7 +429,7 @@ mod tests {
         assert!(group_validate(&overnamed).is_err());
         assert!(group_validate(&crowded).is_err());
         assert!(group_validate(&unidentified).is_err());
-        assert!(restored.person_ids.is_empty());
+        assert_eq!(restored.person_ids.len(), 0);
     }
 
     #[test]
@@ -438,7 +438,7 @@ mod tests {
         let mut person = person_with(" Jane ", " Doe ");
         person.role = " PM ".to_owned();
 
-        assert!(people_load_all().unwrap().is_empty());
+        assert_eq!(people_load_all().unwrap().len(), 0);
 
         person_upsert(&person).unwrap();
         person.name_last = "Roe".to_owned();
@@ -467,7 +467,7 @@ mod tests {
         group_upsert(&group).unwrap();
         person_delete("test").unwrap();
 
-        assert!(people_load_all().unwrap().is_empty());
+        assert_eq!(people_load_all().unwrap().len(), 0);
         assert_eq!(groups_load_all().unwrap()[0].person_ids, vec!["other".to_owned()]);
 
         person_delete("test").unwrap();
@@ -480,7 +480,7 @@ mod tests {
         let _root = root_scoped("groups-store");
         let group = Group { id: " g ".to_owned(), name: " Team ".to_owned(), person_ids: vec![] };
 
-        assert!(groups_load_all().unwrap().is_empty());
+        assert_eq!(groups_load_all().unwrap().len(), 0);
 
         group_upsert(&group).unwrap();
         group_upsert(&Group { name: "Renamed".to_owned(), ..group.clone() }).unwrap();
@@ -493,7 +493,7 @@ mod tests {
 
         group_delete("g").unwrap();
 
-        assert!(groups_load_all().unwrap().is_empty());
+        assert_eq!(groups_load_all().unwrap().len(), 0);
         assert!(group_upsert(&Group { id: String::new(), ..group }).is_err());
     }
 

@@ -414,12 +414,12 @@ mod tests {
         assert!((waveform.peaks[1] - 0.5).abs() < 1e-4);
         assert!((waveform.peaks[2] - 1.0).abs() < 1e-6);
         assert!((waveform.duration_seconds - 6.0 / 16000.0).abs() < 1e-9);
-        assert!(waveform_compute(&path, 0).unwrap().peaks.is_empty());
+        assert_eq!(waveform_compute(&path, 0).unwrap().peaks.len(), 0);
         assert_eq!(capped.peaks.len(), samples.len());
 
         audio_wav_save(&[], 16000, &path).unwrap();
 
-        assert!(waveform_compute(&path, 3).unwrap().peaks.is_empty());
+        assert_eq!(waveform_compute(&path, 3).unwrap().peaks.len(), 0);
         assert!(waveform_compute(&path, 3).unwrap().duration_seconds.abs() < f64::EPSILON);
     }
 
@@ -460,8 +460,8 @@ mod tests {
     #[test]
     fn stereo_frames_with_a_dangling_sample_drop_it() {
         assert_eq!(mix_to_mono(&[1.0, 1.0, 1.0], 2), vec![1.0]);
-        assert!(mix_to_mono(&[], 2).is_empty());
-        assert!(mix_to_mono(&[], 1).is_empty());
+        assert_eq!(mix_to_mono(&[], 2).len(), 0);
+        assert_eq!(mix_to_mono(&[], 1).len(), 0);
     }
 
     #[test]

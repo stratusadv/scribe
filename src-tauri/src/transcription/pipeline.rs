@@ -28,7 +28,7 @@ pub(crate) fn audio_prepare_blocking(source_path: &Path) -> AppResult<(String, P
     let source_metadata = std::fs::metadata(source_path)?;
     let existing = workspace::meta_load(&job_id)?;
 
-    debug_assert!(!job_id.is_empty());
+    debug_assert_ne!(job_id, "");
 
     let label = source_path
         .file_name()
@@ -167,7 +167,7 @@ pub(crate) async fn transcribe_remote_async(
     )
     .await?;
 
-    debug_assert!(!job_id.is_empty());
+    debug_assert_ne!(job_id, "");
 
     workspace::transcript_save(&job_id, &engine_id, &transcript)?;
 
@@ -230,7 +230,7 @@ fn spelling_hint_build(people: &[Person]) -> String {
 }
 
 async fn transcribe_remote_title_apply(job_id: &str, transcript_text: &str) {
-    debug_assert!(!job_id.is_empty());
+    debug_assert_ne!(job_id, "");
 
     let mut meta = match workspace::meta_load(job_id) {
         Ok(Some(meta)) => meta,
@@ -259,7 +259,7 @@ async fn transcribe_remote_title_apply(job_id: &str, transcript_text: &str) {
         }
     };
 
-    debug_assert!(!title.is_empty());
+    debug_assert_ne!(title, "");
 
     meta = match workspace::meta_load(job_id) {
         Ok(Some(meta)) => meta,
@@ -322,7 +322,7 @@ pub(crate) fn transcript_import_blocking(
         segments: transcript_import_segments(trimmed),
     };
 
-    debug_assert!(!transcript.segments.is_empty());
+    debug_assert_ne!(transcript.segments.len(), 0);
 
     workspace::transcript_save(&job_id, ENGINE_ID_IMPORTED, &transcript)?;
 
@@ -339,7 +339,7 @@ fn transcript_import_meta(
     title_clean: Option<String>,
     existing: Option<JobMeta>,
 ) -> JobMeta {
-    debug_assert!(!trimmed.is_empty());
+    debug_assert_ne!(trimmed, "");
 
     let source_size_bytes = trimmed.len() as u64;
 
@@ -389,7 +389,7 @@ fn transcript_import_meta(
 }
 
 fn transcript_import_segments(trimmed: &str) -> Vec<TranscriptSegment> {
-    debug_assert!(!trimmed.is_empty());
+    debug_assert_ne!(trimmed, "");
 
     let segments: Vec<TranscriptSegment> = trimmed
         .split('\n')

@@ -43,8 +43,8 @@ const HTTP_TIMEOUTS: ClientTimeouts = ClientTimeouts {
     request: Duration::from_secs(REQUEST_TIMEOUT_SECONDS),
 };
 
-const _: () = assert!(!SSE_SEPARATOR.is_empty());
-const _: () = assert!(!SSE_SEPARATOR_CRLF.is_empty());
+const _: () = assert!(SSE_SEPARATOR.len() == 2);
+const _: () = assert!(SSE_SEPARATOR_CRLF.len() == 4);
 const _: () = assert!(SSE_EVENT_BYTES_MAX < NOTES_BYTES_MAX);
 const _: () = assert!(NOTES_BYTES_MAX < REASONING_BYTES_MAX);
 const _: () = assert!(CONNECT_TIMEOUT_SECONDS < READ_TIMEOUT_SECONDS);
@@ -126,7 +126,7 @@ pub(super) async fn chat_completion(
     let client = client_get(&HTTP_CLIENT)?;
 
     debug_assert!(url.starts_with("http"));
-    debug_assert!(!body.model.is_empty());
+    debug_assert_ne!(body.model, "");
 
     let parsed: ChatResponse = retry_run(|| async {
         let mut request = client.post(&url);
@@ -195,7 +195,7 @@ pub(super) async fn chat_completion_streaming(
     system_prompt: &str,
     user_prompt: &str,
 ) -> AppResult<String> {
-    debug_assert!(!stream_id.is_empty());
+    debug_assert_ne!(stream_id, "");
 
     let (url, body, api_key) = build_request(endpoint, system_prompt, user_prompt, true);
     let client = client_get(&HTTP_CLIENT)?;
@@ -234,7 +234,7 @@ async fn chat_completion_stream_read(
     cancel_flag: &AtomicBool,
     response: reqwest::Response,
 ) -> AppResult<String> {
-    debug_assert!(!stream_id.is_empty());
+    debug_assert_ne!(stream_id, "");
 
     let mut stream = response.bytes_stream();
 
@@ -301,14 +301,14 @@ fn chat_completion_stream_end(
     cancellation: &CancellationRegistry,
     stream_id: String,
 ) {
-    debug_assert!(!stream_id.is_empty());
+    debug_assert_ne!(stream_id, "");
 
     cancellation.clear(&stream_id);
     chunk_emit(app, ChatChunk { stream_id, text: String::new(), done: true });
 }
 
 fn chunk_emit(app: &tauri::AppHandle, chunk: ChatChunk) {
-    debug_assert!(!chunk.stream_id.is_empty());
+    debug_assert_ne!(chunk.stream_id, "");
 
     if let Err(error) = app.emit(EVENT_NOTES_CHUNK, chunk) {
         tracing::warn!("notes chunk event could not be emitted: {}", error);
@@ -349,7 +349,7 @@ fn chat_completion_stream_event_apply(
     payload: &str,
     state: &mut StreamState,
 ) {
-    debug_assert!(!payload.is_empty());
+    debug_assert_ne!(payload, "");
 
     let parsed = match serde_json::from_str::<Value>(payload) {
         Ok(parsed) => parsed,
@@ -427,7 +427,7 @@ fn sse_event_end(buffer: &[u8]) -> Option<(usize, usize)> {
 }
 
 fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    debug_assert!(!needle.is_empty());
+    debug_assert_ne!(needle.len(), 0);
 
     let position = haystack
         .windows(needle.len())

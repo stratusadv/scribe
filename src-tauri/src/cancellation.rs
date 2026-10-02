@@ -18,7 +18,7 @@ impl CancellationRegistry {
     }
 
     pub(crate) fn register(&self, stream_id: &str) -> Arc<AtomicBool> {
-        debug_assert!(!stream_id.is_empty());
+        debug_assert_ne!(stream_id, "");
 
         let flag = Arc::new(AtomicBool::new(false));
 
@@ -36,7 +36,7 @@ impl CancellationRegistry {
     }
 
     pub(crate) fn trigger(&self, stream_id: &str) {
-        debug_assert!(!stream_id.is_empty());
+        debug_assert_ne!(stream_id, "");
 
         if let Ok(guard) = self.flags.lock() {
             if let Some(flag) = guard.get(stream_id) {
@@ -48,7 +48,7 @@ impl CancellationRegistry {
     }
 
     pub(crate) fn clear(&self, stream_id: &str) {
-        debug_assert!(!stream_id.is_empty());
+        debug_assert_ne!(stream_id, "");
 
         if let Ok(mut guard) = self.flags.lock() {
             drop(guard.remove(stream_id));

@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(labels.get(&7), Some(&1));
         assert_eq!(labels.get(&3), None);
         assert_eq!(labels.get(&9), None);
-        assert!(labels_link(&[], &current, 0.0, 0.0).is_empty());
+        assert_eq!(labels_link(&[], &current, 0.0, 0.0).len(), 0);
     }
 
     #[test]

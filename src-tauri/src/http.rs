@@ -163,7 +163,7 @@ pub(crate) async fn response_ensure_ok(
     response: reqwest::Response,
     label: &str,
 ) -> AppResult<reqwest::Response> {
-    debug_assert!(!label.is_empty());
+    debug_assert_ne!(label, "");
 
     if response.status().is_success() {
         return Ok(response);

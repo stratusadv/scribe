@@ -18,7 +18,7 @@ const EXPORT_EXTENSION_MARKDOWN: &str = "md";
 const TITLE_DEFAULT: &str = "Notes";
 
 fn notes_markdown_load(job_id: &str) -> AppResult<String> {
-    debug_assert!(!job_id.is_empty());
+    debug_assert_ne!(job_id, "");
 
     let markdown = workspace::notes_load(job_id)?
         .ok_or_else(|| AppError::Export(format!("no notes found for job {job_id}")))?;
@@ -223,7 +223,7 @@ fn notes_export_write_blocking(job_id: &str, target_path: &Path) -> AppResult<()
         }
     };
 
-    debug_assert!(!bytes.is_empty());
+    debug_assert_ne!(bytes.len(), 0);
 
     if let Some(parent) = target_path.parent() {
         fs::create_dir_all(parent)?;
@@ -361,7 +361,7 @@ pub(crate) async fn notes_print(app: AppHandle, job_id: String) -> AppResult<()>
     let url = tauri::Url::parse(&asset_url(&page_path))
         .map_err(|error| AppError::Export(format!("print page url: {error}")))?;
 
-    debug_assert!(!url.scheme().is_empty());
+    debug_assert_ne!(url.scheme(), "");
 
     if let Some(existing) = app.get_webview_window(PRINT_WINDOW_LABEL) {
         existing

@@ -120,7 +120,7 @@ mod tests {
         assert_eq!(endpoint.api_path_chat_resolved(), API_PATH_CHAT_DEFAULT);
         assert_eq!(minimal.purpose, APIEndpointPurpose::Notes);
         assert_eq!(minimal.api_path_transcribe_resolved(), API_PATH_TRANSCRIBE_DEFAULT);
-        assert!(minimal.api_key.is_empty());
+        assert_eq!(minimal.api_key, "");
         assert!(!minimal.has_api_key);
         assert!(minimal.temperature.is_none());
         assert!(serde_json::from_str::<APIEndpointPurpose>(r#""Notes""#).is_err());

@@ -386,7 +386,7 @@ mod tests {
     fn every_seeded_template_passes_validation() {
         let seeded = default_templates_seed();
 
-        assert!(!seeded.is_empty());
+        assert_ne!(seeded.len(), 0);
 
         for template in seeded {
             assert!(template_validate(&template).is_ok());
@@ -463,7 +463,7 @@ mod tests {
         let restored: NotesTemplate = serde_json::from_str(raw).unwrap();
 
         assert!(template_validate(&template).is_ok());
-        assert!(restored.description.is_empty());
+        assert_eq!(restored.description, "");
         assert!(!restored.edited);
     }
 

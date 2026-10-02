@@ -155,7 +155,7 @@ fn recording_open(slot: &RecordingSlot, sample_rate: u32, path: PathBuf) -> AppR
 
     drop(guard);
 
-    debug_assert!(!path_text.is_empty());
+    debug_assert_ne!(path_text, "");
 
     Ok(path_text)
 }
