@@ -4,6 +4,8 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 import { ipc } from '../lib/ipc'
 import { error_dialog_show } from '../lib/errors'
 import { seconds_to_clock } from '../lib/duration'
+import { speaker_color, speaker_name } from '../lib/speakers'
+import { use_people } from '../composables/use_people'
 import { use_pipeline } from '../composables/use_pipeline'
 import { use_shortcuts } from '../composables/use_shortcuts'
 import type { ComponentPublicInstance } from 'vue'
@@ -14,6 +16,7 @@ interface DisplayRow {
     text: string
     start_seconds: number
     end_seconds: number
+    speaker: number | null
     segment_index: number
 }
 
@@ -22,11 +25,13 @@ const ROWS_RENDER_THRESHOLD_PX = 200
 const COPIED_FLASH_MS = 1500
 const HIGHLIGHT_NAME = 'transcript-filter'
 const REGEX_ESCAPE = /[.*+?^${}()|[\]\\]/g
-const { job_id_current, transcript_segments_text_set } = use_pipeline()
+const { job_id_current, meta_current, transcript_segments_text_set } = use_pipeline()
+const { person_by_id } = use_people()
 
 const props = defineProps<{
     transcript: Transcript | null
     segment_indexes_highlighted?: number[]
+    speaker?: number
 }>()
 
 const filter_text = ref('')
@@ -41,6 +46,10 @@ const audio_checked = ref(false)
 const playback_index = ref<number | null>(null)
 const rows_render_limit = ref(ROWS_RENDER_STEP)
 
+function row_speaker_name(speaker: number): string {
+    return speaker_name(speaker, meta_current.value?.speaker_links ?? [], person_by_id)
+}
+
 const rows = computed<DisplayRow[]>(() => {
     if (!props.transcript) return []
 
@@ -49,9 +58,11 @@ const rows = computed<DisplayRow[]>(() => {
             text: segment.text.trim(),
             start_seconds: segment.start_seconds,
             end_seconds: segment.end_seconds,
+            speaker: segment.speaker ?? null,
             segment_index,
         }))
         .filter((row) => row.text.length > 0)
+        .filter((row) => props.speaker === undefined || row.speaker === props.speaker)
 })
 
 const filter_regex = computed<RegExp | null>(() => {
@@ -421,6 +432,13 @@ onUnmounted(() => {
                     <div class="transcript-pane-row-meta">
                         <span class="transcript-pane-row-time">
                             {{ row_label(row) }}
+                        </span>
+                        <span
+                            v-if="row.speaker !== null"
+                            class="transcript-pane-row-speaker"
+                            :style="{ color: speaker_color(row.speaker) }"
+                        >
+                            {{ row_speaker_name(row.speaker) }}
                         </span>
                         <span v-if="index_copied === index" class="pill-active">Copied</span>
                     </div>

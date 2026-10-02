@@ -25,6 +25,8 @@ pub(crate) struct Settings {
     pub(crate) api_host: Option<String>,
     #[serde(default)]
     pub(crate) jobs_view: Option<String>,
+    #[serde(default)]
+    pub(crate) speakers: Option<bool>,
 }
 
 pub(crate) fn settings_load() -> AppResult<Settings> {
@@ -79,6 +81,7 @@ mod tests {
         let settings = Settings {
             theme: Some("thème".to_owned()),
             jobs_view: Some("grid".to_owned()),
+            speakers: None,
             ..Settings::default()
         };
 
@@ -129,6 +132,7 @@ mod tests {
             notes_thinking: None,
             api_host: None,
             jobs_view: None,
+            speakers: None,
         };
 
         let raw = serde_json::to_string(&settings).expect("serialize");

@@ -30,6 +30,7 @@ export function job_meta_build(patch: Partial<JobMeta> = {}): JobMeta {
         project: null,
         tags: [],
         favourite: false,
+        speaker_links: [],
         ...patch,
     }
 }
@@ -50,6 +51,7 @@ export function transcript_build(lines: string[]): Transcript {
         text,
         start_seconds: index * 10,
         end_seconds: (index + 1) * 10,
+        speaker: null,
     }))
 
     return { text: lines.join(' '), segments }

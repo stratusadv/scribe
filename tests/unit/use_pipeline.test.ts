@@ -213,8 +213,8 @@ describe('transcript_segments_text_set', () => {
         const expected = {
             text: 'hello there',
             segments: [
-                { text: 'hello', start_seconds: 0, end_seconds: 10 },
-                { text: '  there  ', start_seconds: 10, end_seconds: 20 },
+                { text: 'hello', start_seconds: 0, end_seconds: 10, speaker: null },
+                { text: '  there  ', start_seconds: 10, end_seconds: 20, speaker: null },
             ],
         }
 

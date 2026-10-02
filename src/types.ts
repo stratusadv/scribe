@@ -2,6 +2,7 @@ export interface TranscriptSegment {
     text: string
     start_seconds: number
     end_seconds: number
+    speaker: number | null
 }
 
 export interface Transcript {
@@ -79,6 +80,12 @@ export interface JobMeta {
     project: string | null
     tags: string[]
     favourite: boolean
+    speaker_links: SpeakerLink[]
+}
+
+export interface SpeakerLink {
+    speaker: number
+    person_id: string
 }
 
 export interface JobListing extends JobMeta {
@@ -95,6 +102,7 @@ export interface JobMetaPatch {
     project?: string | null
     tags?: string[]
     favourite?: boolean
+    speaker_links?: SpeakerLink[]
 }
 
 export interface ChatChunk {
@@ -108,9 +116,10 @@ export interface SegmentChunk {
     text: string
     start_seconds: number
     end_seconds: number
+    speaker: number | null
 }
 
-export type TranscriptionStage = 'preparing_audio' | 'transcribing' | 'done'
+export type TranscriptionStage = 'preparing_audio' | 'detecting_speakers' | 'transcribing' | 'done'
 
 export interface StageChunk {
     stream_id: string
@@ -146,6 +155,7 @@ export interface Settings {
     notes_thinking: ThinkingChoice | null
     api_host: string | null
     jobs_view: JobsViewChoice | null
+    speakers: boolean | null
 }
 
 export interface NotesModels {

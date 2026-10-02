@@ -113,6 +113,7 @@ const transcribe_label = computed(() => {
     if (!busy.value) return 'Transcribe'
 
     switch (stage_active.value) {
+        case 'detecting_speakers': return 'Finding speakers…'
         case 'transcribing': return 'Transcribing…'
         case 'done': return 'Finalizing…'
         default: return 'Preparing audio…'
@@ -300,6 +301,7 @@ function segment_append(chunk: SegmentChunk) {
         text: chunk.text,
         start_seconds: chunk.start_seconds,
         end_seconds: chunk.end_seconds,
+        speaker: chunk.speaker,
     }
 
     typewriter_push(trimmed)

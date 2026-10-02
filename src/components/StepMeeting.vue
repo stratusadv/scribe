@@ -5,10 +5,15 @@ import { use_jobs } from '../composables/use_jobs'
 import { use_notes_templates } from '../composables/use_notes_templates'
 import { person_name_full, use_people } from '../composables/use_people'
 import { use_pipeline } from '../composables/use_pipeline'
+import { seconds_to_clock } from '../lib/duration'
+import { speaker_color, speaker_label, speakers_summarize } from '../lib/speakers'
 import NoticeBanner from './NoticeBanner.vue'
 import PeoplePicker from './PeoplePicker.vue'
+import SearchSelect from './SearchSelect.vue'
+import type { SearchSelectOption } from './SearchSelect.vue'
 import StepBar from './StepBar.vue'
-import type { JobMetaPatch, Person } from '../types'
+import TranscriptPane from './TranscriptPane.vue'
+import type { JobMetaPatch, Person, SpeakerLink } from '../types'
 
 
 type PickerTarget = 'present' | 'mentioned'
@@ -25,13 +30,14 @@ const {
     job_id_current,
     meta_current,
     template_id_selected,
+    transcript,
     meta_refresh,
     template_id_ensure,
     view_set,
 } = use_pipeline()
 
 const { refresh: jobs_refresh } = use_jobs()
-const { person_by_id } = use_people()
+const { people_sorted, person_by_id } = use_people()
 const { templates } = use_notes_templates()
 const title_input = ref('')
 const person_ids_current = ref<string[]>([])
@@ -40,6 +46,8 @@ const attendees_legacy = ref<string[]>([])
 const picker_target = ref<PickerTarget | null>(null)
 const project_input = ref('')
 const tags_current = ref<string[]>([])
+const speaker_links_current = ref<SpeakerLink[]>([])
+const speaker_open = ref<number | null>(null)
 const status = ref<SaveStatus>('idle')
 const error_message = ref<string | null>(null)
 let timer_id: ReturnType<typeof setTimeout> | null = null
@@ -54,6 +62,18 @@ function people_resolve(ids: string[]): Person[] {
 
 const people_present = computed(() => people_resolve(person_ids_current.value))
 const people_mentioned = computed(() => people_resolve(person_ids_mentioned.value))
+const speakers = computed(() => (transcript.value ? speakers_summarize(transcript.value) : []))
+
+const person_options = computed<SearchSelectOption[]>(() =>
+    people_sorted.value.map((person) => ({
+        value: person.id,
+        text: person.role ? `${person_name_full(person)} (${person.role})` : person_name_full(person),
+    })),
+)
+
+const template_options = computed<SearchSelectOption[]>(() =>
+    templates.value.map((template) => ({ value: template.id, text: template.name })),
+)
 
 const picker_ids = computed({
     get: () => {
@@ -97,6 +117,13 @@ onUnmounted(() => {
 })
 
 watch(
+    () => job_id_current.value,
+    () => {
+        speaker_open.value = null
+    },
+)
+
+watch(
     () => meta_current.value,
     (meta) => {
         if (!meta) {
@@ -106,6 +133,7 @@ watch(
             attendees_legacy.value = []
             project_input.value = ''
             tags_current.value = []
+            speaker_links_current.value = []
             patch_synced = ''
 
             return
@@ -117,13 +145,21 @@ watch(
         attendees_legacy.value = meta.person_ids.length === 0 ? [...meta.attendees] : []
         project_input.value = meta.project ?? ''
         tags_current.value = [...meta.tags]
+        speaker_links_current.value = meta.speaker_links.map((link) => ({ ...link }))
         patch_synced = JSON.stringify(patch_build())
     },
     { immediate: true },
 )
 
 watch(
-    [title_input, person_ids_current, person_ids_mentioned, project_input, tags_current],
+    [
+        title_input,
+        person_ids_current,
+        person_ids_mentioned,
+        project_input,
+        tags_current,
+        speaker_links_current,
+    ],
     () => {
         if (!job_id_current.value) return
         if (!autosave_pending() && JSON.stringify(patch_build()) === patch_synced) return
@@ -143,6 +179,23 @@ function patch_build(): JobMetaPatch {
         person_ids_mentioned: people_mentioned.value.map((person) => person.id),
         project: project_input.value.trim(),
         tags: [...tags_current.value],
+        speaker_links: speaker_links_current.value.map((link) => ({ ...link })),
+    }
+}
+
+function speaker_person_id(speaker: number): string {
+    return speaker_links_current.value.find((link) => link.speaker === speaker)?.person_id ?? ''
+}
+
+function speaker_assign(speaker: number, person_id: string) {
+    const others = speaker_links_current.value.filter((link) => link.speaker !== speaker)
+
+    speaker_links_current.value = person_id.length === 0
+        ? others
+        : [...others, { speaker, person_id }]
+
+    if (person_id.length > 0 && !person_ids_current.value.includes(person_id)) {
+        person_ids_current.value = [...person_ids_current.value, person_id]
     }
 }
 
@@ -235,16 +288,14 @@ async function next() {
 
                 <div class="step-field">
                     <label class="label" for="details-template">Template</label>
-                    <select id="details-template" v-model="template_id_selected" class="input">
-                        <option :value="null" disabled>Choose a template</option>
-                        <option
-                            v-for="template in templates"
-                            :key="template.id"
-                            :value="template.id"
-                        >
-                            {{ template.name }}
-                        </option>
-                    </select>
+                    <SearchSelect
+                        id="details-template"
+                        label="Template"
+                        placeholder="Choose a template"
+                        :options="template_options"
+                        :value="template_id_selected"
+                        @update:value="template_id_selected = $event"
+                    />
                     <p v-if="templates.length === 0" class="meta">
                         There are no templates yet.
                         <button type="button" class="underline" @click="view_set('templates')">
@@ -264,7 +315,7 @@ async function next() {
                     >
                         + Add
                     </button>
-                    <span v-for="person in people_present" :key="person.id" class="pill tag-chip">
+                    <span v-for="person in people_present" :key="person.id" class="pill tag-chip tag-chip-person">
                         {{ person_name_full(person) }}<template v-if="person.role"> ({{ person.role }})</template>
                         <button
                             type="button"
@@ -291,6 +342,41 @@ async function next() {
                 </p>
             </div>
 
+            <div v-if="speakers.length > 0" class="step-field">
+                <span class="label">Speakers</span>
+                <div class="meeting-speakers">
+                    <div v-for="summary in speakers" :key="summary.speaker" class="meeting-speaker">
+                        <div class="meeting-speaker-head">
+                            <span
+                                class="meeting-speaker-label"
+                                :style="{ color: speaker_color(summary.speaker) }"
+                            >
+                                {{ speaker_label(summary.speaker) }}
+                            </span>
+                            <span class="meta">{{ seconds_to_clock(summary.seconds) }} of talking</span>
+                        </div>
+                        <div class="meeting-speaker-actions">
+                            <SearchSelect
+                                empty_text="Not assigned"
+                                :color="speaker_color(summary.speaker)"
+                                :label="`Who is ${speaker_label(summary.speaker)}`"
+                                :options="person_options"
+                                :value="speaker_person_id(summary.speaker)"
+                                @update:value="speaker_assign(summary.speaker, $event)"
+                            />
+                            <button
+                                type="button"
+                                class="btn-default"
+                                :aria-label="`Transcript of ${speaker_label(summary.speaker)}`"
+                                @click="speaker_open = summary.speaker"
+                            >
+                                Transcript
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div class="step-field">
                 <span class="label">Mentioned</span>
                 <div class="meeting-details-people">
@@ -301,7 +387,7 @@ async function next() {
                     >
                         + Add
                     </button>
-                    <span v-for="person in people_mentioned" :key="person.id" class="pill tag-chip">
+                    <span v-for="person in people_mentioned" :key="person.id" class="pill tag-chip tag-chip-person">
                         {{ person_name_full(person) }}<template v-if="person.role"> ({{ person.role }})</template>
                         <button
                             type="button"
@@ -342,5 +428,59 @@ async function next() {
             :hint="picker_hint"
             @close="picker_target = null"
         />
+
+        <Teleport v-if="speaker_open !== null" to="body">
+            <div
+                class="app-dialog-backdrop"
+                role="dialog"
+                aria-modal="true"
+                @click.self="speaker_open = null"
+                @keydown.esc="speaker_open = null"
+            >
+                <div class="app-dialog speaker-lines">
+                    <button
+                        type="button"
+                        class="app-dialog-close"
+                        aria-label="Close"
+                        title="Close"
+                        @click="speaker_open = null"
+                    >
+                        <svg
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="1.75"
+                            stroke-linecap="round"
+                            aria-hidden="true"
+                        >
+                            <path d="M6 6l12 12" />
+                            <path d="M18 6L6 18" />
+                        </svg>
+                    </button>
+                    <h3 class="app-dialog-title" :style="{ color: speaker_color(speaker_open) }">
+                        {{ speaker_label(speaker_open) }}
+                    </h3>
+                    <p class="app-dialog-message">
+                        Play a few lines to hear who this is, then pick them below.
+                    </p>
+                    <SearchSelect
+                        empty_text="Not assigned"
+                        :color="speaker_color(speaker_open)"
+                        :label="`Who is ${speaker_label(speaker_open)}`"
+                        :options="person_options"
+                        :value="speaker_person_id(speaker_open)"
+                        @update:value="speaker_assign(speaker_open, $event)"
+                    />
+                    <div class="speaker-lines-transcript">
+                        <TranscriptPane :transcript="transcript" :speaker="speaker_open" />
+                    </div>
+                    <div class="app-dialog-actions">
+                        <button type="button" class="btn-primary" @click="speaker_open = null">
+                            Done
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
     </section>
 </template>
