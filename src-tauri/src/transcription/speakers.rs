@@ -12,6 +12,11 @@ const THREADS_MAX: u32 = 4;
 const GHOST_SHARE_MAX: f64 = 0.02;
 const TURN_SECONDS_MIN: f64 = 1.0;
 const TURN_GAP_SECONDS_MAX: f64 = 1.5;
+const ENVIRONMENT_CONV_THREADS: &str = "POLYVOICE_CONV_THREADS";
+const ENVIRONMENT_EMBED_THREADS: &str = "POLYVOICE_EMBED_THREADS";
+
+/// Single-worker segmentation in polyvoice packs every window of a block at once (4 GB for 20 min).
+const SEGMENTATION_WORKERS_MIN: u32 = 2;
 
 const _: () = assert!(OVERLAP_SECONDS < WINDOW_SECONDS);
 const _: () = assert!(WINDOW_COUNT_MAX > 0);
@@ -159,8 +164,10 @@ fn pipeline_build(
     debug_assert!(threads > 0);
     debug_assert!(window_samples > 0);
 
+    let divisor = segmentation_divisor(cores_available(), threads);
+
     polyvoice_kernels::set_intra_threads(threads as usize);
-    polyvoice_kernels::set_file_parallelism(1);
+    polyvoice_kernels::set_file_parallelism(divisor as usize);
 
     let mut config = PipelineConfig::default();
 
@@ -181,11 +188,29 @@ fn pipeline_build(
         .map_err(speakers_error)
 }
 
-fn threads_budget() -> u32 {
-    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
-    let half = u32::try_from(cores.div_ceil(2)).unwrap_or(THREADS_MAX);
+pub(crate) fn threads_budget_install() {
+    // Runs before any other thread exists; polyvoice reads these on every call.
+    unsafe {
+        std::env::set_var(ENVIRONMENT_EMBED_THREADS, threads_budget().to_string());
+        std::env::set_var(ENVIRONMENT_CONV_THREADS, "1");
+    }
+}
 
-    half.clamp(1, THREADS_MAX)
+fn cores_available() -> u32 {
+    std::thread::available_parallelism()
+        .map_or(1, |cores| u32::try_from(cores.get()).unwrap_or(u32::MAX))
+}
+
+fn threads_budget() -> u32 {
+    cores_available().div_ceil(2).clamp(1, THREADS_MAX)
+}
+
+fn segmentation_divisor(cores: u32, threads: u32) -> u32 {
+    debug_assert!(threads > 0);
+
+    let workers = threads.max(SEGMENTATION_WORKERS_MIN).min(cores).max(1);
+
+    cores.div_ceil(workers).max(1)
 }
 
 fn seconds_of(sample_index: u64, sample_rate: u32) -> f64 {
@@ -250,7 +275,55 @@ fn labels_link(
     labels
 }
 
+pub(crate) fn speaker_turns_from_remote(turns: Vec<SpeakerTurn>) -> Vec<SpeakerTurn> {
+    let received = turns.len();
+
+    let mut valid: Vec<SpeakerTurn> = turns
+        .into_iter()
+        .filter(|turn| turn.start_seconds.is_finite() && turn.end_seconds.is_finite())
+        .filter(|turn| turn.start_seconds >= 0.0 && turn.end_seconds > turn.start_seconds)
+        .collect();
+
+    valid.sort_by(|left, right| left.start_seconds.total_cmp(&right.start_seconds));
+
+    let smoothed = turns_smooth(&valid);
+
+    tracing::info!(
+        target: "scribe_lib::transcription",
+        "speakers: {} remote turns, {} valid, became {} turns",
+        received,
+        valid.len(),
+        smoothed.len()
+    );
+
+    smoothed
+}
+
+fn turns_join(turns: &[SpeakerTurn]) -> Vec<SpeakerTurn> {
+    let mut joined: Vec<SpeakerTurn> = Vec::with_capacity(turns.len());
+
+    for turn in turns {
+        if let Some(last) = joined.last_mut() {
+            if last.speaker == turn.speaker {
+                if turn.start_seconds - last.end_seconds <= TURN_GAP_SECONDS_MAX {
+                    last.end_seconds = last.end_seconds.max(turn.end_seconds);
+
+                    continue;
+                }
+            }
+        }
+
+        joined.push(turn.clone());
+    }
+
+    debug_assert!(joined.len() <= turns.len());
+
+    joined
+}
+
 fn turns_smooth(turns: &[SpeakerTurn]) -> Vec<SpeakerTurn> {
+    let joined = turns_join(turns);
+    let turns = joined.as_slice();
     let mut totals: HashMap<u16, f64> = HashMap::new();
 
     for turn in turns {
@@ -334,7 +407,41 @@ mod tests {
 
         let smoothed = turns_smooth(&raw);
 
-        assert_eq!(smoothed, vec![turn(0, 0.0, 20.8), turn(1, 21.0, 30.5), turn(0, 33.0, 40.0)]);
+        assert_eq!(smoothed, vec![turn(0, 0.0, 20.0), turn(1, 20.5, 30.5), turn(0, 33.0, 40.0)]);
+    }
+
+    #[test]
+    fn a_short_reply_stays_with_the_speaker_who_keeps_talking_after_it() {
+        let raw = vec![
+            turn(0, 0.03, 12.3),
+            turn(1, 13.21, 13.85),
+            turn(1, 14.68, 18.41),
+            turn(0, 25.36, 26.14),
+            turn(0, 26.95, 28.94),
+        ];
+
+        let smoothed = turns_smooth(&raw);
+
+        assert_eq!(
+            smoothed,
+            vec![turn(0, 0.03, 12.3), turn(1, 13.21, 18.41), turn(0, 25.36, 28.94)]
+        );
+    }
+
+    #[test]
+    fn remote_turns_are_validated_sorted_and_smoothed() {
+        let raw = vec![
+            turn(1, 13.21, 18.41),
+            turn(0, 0.0, 12.0),
+            turn(0, f64::NAN, 3.0),
+            turn(1, 5.0, 4.0),
+            turn(1, -1.0, 2.0),
+        ];
+
+        let turns = speaker_turns_from_remote(raw);
+
+        assert_eq!(turns, vec![turn(0, 0.0, 12.0), turn(1, 13.21, 18.41)]);
+        assert_eq!(speaker_turns_from_remote(Vec::new()), Vec::new());
     }
 
     #[test]
@@ -371,5 +478,17 @@ mod tests {
         assert!(threads >= 1);
         assert!(threads <= THREADS_MAX);
         assert!((seconds_of(32000, 16000) - 2.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn segmentation_keeps_two_workers_and_never_exceeds_the_budget() {
+        for cores in 1..=256_u32 {
+            for threads in 1..=THREADS_MAX {
+                let workers = cores.div_ceil(segmentation_divisor(cores, threads));
+
+                assert!(workers <= threads.max(SEGMENTATION_WORKERS_MIN));
+                assert!(workers >= cores.min(SEGMENTATION_WORKERS_MIN));
+            }
+        }
     }
 }

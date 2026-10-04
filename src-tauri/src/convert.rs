@@ -74,7 +74,7 @@ pub(crate) fn markdown_to_html(markdown: &str) -> AppResult<String> {
         HTMLRaw::Escape,
         conversion.output.as_mut_slice(),
     )
-    .map_err(convert_error)?;
+    .map_err(convert_error)? as usize;
 
     let written = conversion.output.get(..length).ok_or_else(output_overflow)?.to_vec();
 
@@ -92,7 +92,9 @@ pub(crate) fn markdown_to_html(markdown: &str) -> AppResult<String> {
 pub(crate) fn markdown_to_docx(markdown: &str) -> AppResult<Vec<u8>> {
     let mut conversion = conversion_begin(markdown)?;
     let Conversion { document, output, workspace } = &mut conversion;
-    let length = docx::write(document, workspace, output.as_mut_slice()).map_err(convert_error)?;
+    let length =
+        docx::write(document, workspace, output.as_mut_slice()).map_err(convert_error)? as usize;
+
     let written = output.get(..length).ok_or_else(output_overflow)?;
 
     debug_assert_eq!(written.len(), length);

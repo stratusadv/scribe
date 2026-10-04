@@ -196,6 +196,7 @@ fn realtime_cpu_limit_soften() {
 }
 
 pub fn run() {
+    transcription::speakers::threads_budget_install();
     tracing_initialize();
 
     #[cfg(target_os = "linux")]

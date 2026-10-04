@@ -1,4 +1,5 @@
 use crate::cancellation::is_cancelled;
+use crate::endpoints::storage::ENDPOINT_ID_TRANSCRIPTION;
 use crate::endpoints::types::APIEndpoint;
 use crate::error::{AppError, AppResult};
 use crate::http::{
@@ -12,7 +13,11 @@ use crate::http::{
     response_json_bounded,
     retry_run,
 };
-use crate::transcription::speakers::{SpeakerTurn, speaker_turns_detect};
+use crate::transcription::speakers::{
+    SpeakerTurn,
+    speaker_turns_detect,
+    speaker_turns_from_remote,
+};
 use crate::transcription::types::{
     EVENT_TRANSCRIPTION_SEGMENT,
     SegmentChunk,
@@ -57,6 +62,8 @@ const PAUSE_FRAMES_MIN: u32 = PAUSE_MS_MIN.div_euclid(SPEECH_FRAME_MS);
 const WAV_HEADER_BYTES_ESTIMATE: u32 = 64;
 const FILE_NAME_DEFAULT: &str = "audio.wav";
 const LABEL_TRANSCRIBE: &str = "remote transcribe";
+const LABEL_SPEAKERS: &str = "remote speaker detection";
+const SPEAKERS_PATH: &str = "/v1/audio/diarization";
 
 const HTTP_TIMEOUTS: ClientTimeouts = ClientTimeouts {
     connect: Duration::from_secs(CONNECT_TIMEOUT_SECONDS),
@@ -84,6 +91,18 @@ struct APISegment {
     start: f64,
     #[serde(default)]
     end: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct APISpeakerTurn {
+    speaker: u16,
+    start: f64,
+    end: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct APISpeakers {
+    turns: Vec<APISpeakerTurn>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,6 +184,7 @@ impl ChunkTimeline {
 #[derive(Clone, Copy)]
 struct ChunkUpload<'request> {
     url: &'request str,
+    speakers_url: Option<&'request str>,
     api_key: &'request str,
     model: &'request str,
     spelling_hint: &'request str,
@@ -178,9 +198,12 @@ pub(super) async fn transcribe_audio_file(
     speakers_dir: Option<&Path>,
     progress: Option<&TranscribeProgress>,
 ) -> AppResult<Transcript> {
+    let host = endpoint.host_resolved().trim_end_matches('/');
     let path = endpoint.api_path_transcribe_resolved();
-    let url = format!("{}{}", endpoint.host_resolved().trim_end_matches('/'), path);
+    let url = format!("{host}{path}");
     let chunk_seconds = endpoint.transcribe_chunk_seconds.filter(|seconds| *seconds > 0);
+    let speakers_url = format!("{host}{SPEAKERS_PATH}");
+    let speakers_remote = endpoint.id == ENDPOINT_ID_TRANSCRIPTION;
 
     debug_assert!(url.starts_with("http"));
     debug_assert_ne!(endpoint.model_resolved(), "");
@@ -191,6 +214,7 @@ pub(super) async fn transcribe_audio_file(
 
     let upload = ChunkUpload {
         url: &url,
+        speakers_url: speakers_remote.then_some(speakers_url.as_str()),
         api_key: endpoint.api_key_resolved(),
         model: endpoint.model_resolved(),
         spelling_hint,
@@ -274,22 +298,8 @@ async fn transcribe_chunked(
 ) -> AppResult<Transcript> {
     debug_assert!(chunk_seconds > 0);
 
-    let audio_path_owned = audio_path.to_path_buf();
-    let speakers_dir_owned = speakers_dir.map(Path::to_path_buf);
-
-    if speakers_dir_owned.is_some() {
-        if let Some(progress) = progress {
-            progress.emit_stage("detecting_speakers");
-        }
-    }
-
-    let (samples, sample_rate, turns) = crate::blocking::run(move || {
-        let (samples, sample_rate) = audio_wav_load(&audio_path_owned)?;
-        let turns = speakers_dir_owned.and_then(|dir| speaker_turns_or_none(&samples, sample_rate, &dir));
-
-        Ok::<_, AppError>((samples, sample_rate, turns))
-    })
-    .await?;
+    let (samples, sample_rate, turns) =
+        audio_and_speakers_load(audio_path, upload, speakers_dir, progress).await?;
 
     if samples.is_empty() {
         return Ok(Transcript { text: String::new(), segments: Vec::new() });
@@ -718,7 +728,99 @@ fn chunk_bounds_build(speech: &SpeechFrames, cut: ChunkCut) -> AppResult<Vec<Ran
     Ok(bounds)
 }
 
-fn speaker_turns_or_none(samples: &[f32], sample_rate: u32, dir: &Path) -> Option<Vec<SpeakerTurn>> {
+async fn audio_and_speakers_load(
+    audio_path: &Path,
+    upload: ChunkUpload<'_>,
+    speakers_dir: Option<&Path>,
+    progress: Option<&TranscribeProgress>,
+) -> AppResult<(Vec<f32>, u32, Option<Vec<SpeakerTurn>>)> {
+    let audio_path_owned = audio_path.to_path_buf();
+    let speakers_dir_owned = speakers_dir.map(Path::to_path_buf);
+
+    if speakers_dir_owned.is_some() {
+        if let Some(progress) = progress {
+            progress.emit_stage("detecting_speakers");
+        }
+    }
+
+    let turns_remote = match (speakers_dir_owned.is_some(), upload.speakers_url) {
+        (true, Some(url)) => speaker_turns_remote_or_none(url, upload.api_key, audio_path).await,
+        _ => None,
+    };
+
+    crate::blocking::run(move || {
+        let (samples, sample_rate) = audio_wav_load(&audio_path_owned)?;
+
+        let turns = turns_remote.or_else(|| {
+            speakers_dir_owned.and_then(|dir| speaker_turns_or_none(&samples, sample_rate, &dir))
+        });
+
+        Ok::<_, AppError>((samples, sample_rate, turns))
+    })
+    .await
+}
+
+async fn speaker_turns_remote(
+    url: &str,
+    api_key: &str,
+    audio_path: &Path,
+) -> AppResult<Vec<SpeakerTurn>> {
+    debug_assert!(url.starts_with("http"));
+
+    let client = client_get(&HTTP_CLIENT)?;
+    let bytes = tokio::fs::read(audio_path).await?;
+
+    let part = multipart::Part::bytes(bytes)
+        .file_name(FILE_NAME_DEFAULT)
+        .mime_str("audio/wav")?;
+
+    let form = multipart::Form::new().part("file", part);
+    let mut request = client.post(url);
+
+    if !api_key.is_empty() {
+        request = request.bearer_auth(api_key);
+    }
+
+    let response = request.multipart(form).send().await?;
+    let response = response_ensure_ok(response, LABEL_SPEAKERS).await?;
+    let parsed = response_json_bounded::<APISpeakers>(response, RESPONSE_BYTES_MAX).await?;
+
+    let turns: Vec<SpeakerTurn> = parsed
+        .turns
+        .into_iter()
+        .map(|turn| SpeakerTurn {
+            speaker: turn.speaker,
+            start_seconds: turn.start,
+            end_seconds: turn.end,
+        })
+        .collect();
+
+    Ok(speaker_turns_from_remote(turns))
+}
+
+async fn speaker_turns_remote_or_none(
+    url: &str,
+    api_key: &str,
+    audio_path: &Path,
+) -> Option<Vec<SpeakerTurn>> {
+    match speaker_turns_remote(url, api_key, audio_path).await {
+        Ok(turns) => Some(turns),
+        Err(error) => {
+            tracing::warn!(
+                target: "scribe_lib::transcription",
+                "remote speaker detection unavailable, detecting on this computer: {error}"
+            );
+
+            None
+        }
+    }
+}
+
+fn speaker_turns_or_none(
+    samples: &[f32],
+    sample_rate: u32,
+    dir: &Path,
+) -> Option<Vec<SpeakerTurn>> {
     match speaker_turns_detect(samples, sample_rate, dir) {
         Ok(turns) => Some(turns),
         Err(error) => {

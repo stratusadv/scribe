@@ -162,16 +162,18 @@ fn waveform_peaks_normalize(peaks: &mut [f32]) {
 
 pub(crate) fn load_for_whisper(path: &Path) -> AppResult<Vec<f32>> {
     let decoded = decode_packets(decode_track_open(path)?)?;
-    let mono = mix_to_mono(&decoded.samples, decoded.channels);
+    let sample_rate = decoded.sample_rate;
+    let interleaved_length = decoded.samples.len();
+    let mono = mix_to_mono(decoded.samples, decoded.channels);
 
-    debug_assert!(decoded.sample_rate > 0);
-    debug_assert!(mono.len() <= decoded.samples.len());
+    debug_assert!(sample_rate > 0);
+    debug_assert!(mono.len() <= interleaved_length);
 
-    if decoded.sample_rate == SAMPLE_RATE_WHISPER {
+    if sample_rate == SAMPLE_RATE_WHISPER {
         return Ok(mono);
     }
 
-    resample(&mono, decoded.sample_rate, SAMPLE_RATE_WHISPER)
+    resample(&mono, sample_rate, SAMPLE_RATE_WHISPER)
 }
 
 fn decode_track_open(path: &Path) -> AppResult<DecodeTrack> {
@@ -326,11 +328,11 @@ fn decode_packets_finish(
     Ok(decoded)
 }
 
-fn mix_to_mono(interleaved: &[f32], channels: u16) -> Vec<f32> {
+fn mix_to_mono(interleaved: Vec<f32>, channels: u16) -> Vec<f32> {
     debug_assert!(channels > 0);
 
     if channels == 1 {
-        return interleaved.to_vec();
+        return interleaved;
     }
 
     let channel_count = channels as usize;
@@ -459,9 +461,9 @@ mod tests {
 
     #[test]
     fn stereo_frames_with_a_dangling_sample_drop_it() {
-        assert_eq!(mix_to_mono(&[1.0, 1.0, 1.0], 2), vec![1.0]);
-        assert_eq!(mix_to_mono(&[], 2).len(), 0);
-        assert_eq!(mix_to_mono(&[], 1).len(), 0);
+        assert_eq!(mix_to_mono(vec![1.0, 1.0, 1.0], 2), vec![1.0]);
+        assert_eq!(mix_to_mono(Vec::new(), 2).len(), 0);
+        assert_eq!(mix_to_mono(Vec::new(), 1).len(), 0);
     }
 
     #[test]
@@ -570,8 +572,8 @@ mod tests {
 
     #[test]
     fn stereo_frames_are_averaged_into_one_channel() {
-        assert_eq!(mix_to_mono(&[1.0, 0.0, 0.5, 0.5], 2), vec![0.5, 0.5]);
-        assert_eq!(mix_to_mono(&[0.25, 0.75], 1), vec![0.25, 0.75]);
+        assert_eq!(mix_to_mono(vec![1.0, 0.0, 0.5, 0.5], 2), vec![0.5, 0.5]);
+        assert_eq!(mix_to_mono(vec![0.25, 0.75], 1), vec![0.25, 0.75]);
     }
 
     #[test]
