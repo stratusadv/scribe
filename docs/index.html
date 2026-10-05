@@ -22,6 +22,8 @@
             --blue: #2e7de9;
             --cyan: #007197;
             --magenta: #9854f1;
+            --ring: rgba(52, 59, 88, 0.16);
+            --lift: 0 1px 2px rgba(52, 59, 88, 0.08), 0 14px 32px -12px rgba(52, 59, 88, 0.32), 0 40px 80px -32px rgba(52, 59, 88, 0.4);
             --radius: 14px;
             color-scheme: light;
         }
@@ -38,8 +40,22 @@
                 --blue: #7aa2f7;
                 --cyan: #7dcfff;
                 --magenta: #bb9af7;
+                --ring: rgba(192, 202, 245, 0.14);
+                --lift: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 32px -12px rgba(0, 0, 0, 0.6), 0 40px 80px -32px rgba(0, 0, 0, 0.75);
                 color-scheme: dark;
             }
+        }
+
+        @property --gx {
+            syntax: "<percentage>";
+            inherits: true;
+            initial-value: 85%;
+        }
+
+        @property --gy {
+            syntax: "<percentage>";
+            inherits: true;
+            initial-value: 0%;
         }
 
         * {
@@ -93,8 +109,8 @@
             top: 0;
             display: flex;
             flex-direction: column;
-            height: 100vh;
-            padding: 56px 48px 0;
+            min-height: 100vh;
+            padding: clamp(32px, 6vh, 56px) 48px 0;
             background: var(--surface);
             border-right: 1px solid var(--line);
         }
@@ -106,23 +122,61 @@
         }
 
         .shot {
-            height: clamp(140px, 24vh, 280px);
-            margin: 40px -48px auto 0;
-            overflow: hidden;
+            display: grid;
+            flex: 1 1 0;
+            align-items: center;
+            justify-items: start;
+            min-height: 120px;
+            margin: clamp(24px, 4.5vh, 40px) 0 0;
+            container-type: size;
             perspective: 1400px;
-            mask-image: linear-gradient(to bottom, #000 55%, transparent);
-            -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
         }
 
-        .shot img {
+        .frame {
+            --rx: 9deg;
+            --ry: 16deg;
+            position: relative;
+            width: min(100cqw, 143.28cqh, 46rem);
+            aspect-ratio: 2880 / 2010;
+            overflow: hidden;
+            border-radius: 10px;
+            box-shadow: var(--lift);
+            transform: translateY(0) rotateX(var(--rx)) rotateY(var(--ry));
+            transition-property: transform, --gx, --gy;
+            transition-duration: 600ms;
+            transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .frame::before,
+        .frame::after {
+            position: absolute;
+            inset: 0;
+            border-radius: inherit;
+            content: "";
+            pointer-events: none;
+        }
+
+        .frame::before {
+            background: radial-gradient(circle at var(--gx) var(--gy), rgba(255, 255, 255, 0.35), transparent 60%);
+            mix-blend-mode: soft-light;
+        }
+
+        .frame::after {
+            box-shadow: inset 0 0 0 1px var(--ring);
+        }
+
+        .frame img {
             display: block;
-            width: 180%;
-            height: auto;
-            border: 1px solid var(--line);
-            border-radius: 12px;
-            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
-            transform: rotateY(-10deg) rotateX(4deg);
-            transform-origin: left top;
+            width: 100%;
+            height: 100%;
+        }
+
+        html:not(.loading) .frame {
+            animation: tilt-in 1200ms 120ms cubic-bezier(0.16, 1, 0.3, 1) backwards;
+        }
+
+        @keyframes tilt-in {
+            from { opacity: 0; transform: translateY(48px) rotateX(32deg) rotateY(28deg); }
         }
 
         h2 {
@@ -138,7 +192,7 @@
         }
 
         h1 {
-            margin: 48px 0 16px;
+            margin: clamp(24px, 4.5vh, 48px) 0 16px;
             font-size: clamp(2rem, 3.6vw, 3rem);
             font-weight: 600;
             line-height: 1.1;
@@ -169,7 +223,7 @@
             display: flex;
             flex-wrap: wrap;
             gap: 8px 20px;
-            margin: 0 0 48px;
+            margin: 0 0 clamp(24px, 4.5vh, 48px);
             font-size: 0.875rem;
         }
 
@@ -177,7 +231,7 @@
             display: flex;
             align-items: flex-end;
             gap: 6px;
-            height: 140px;
+            height: clamp(72px, 12vh, 140px);
             margin: 0 -48px;
             padding: 0 24px;
             overflow: hidden;
@@ -202,7 +256,8 @@
         }
 
         @media (prefers-reduced-motion: reduce) {
-            .wave i {
+            .wave i,
+            html:not(.loading) .frame {
                 animation: none;
             }
         }
@@ -337,15 +392,22 @@
 
             .brand {
                 position: static;
-                height: auto;
+                min-height: 0;
                 padding: 40px 16px 0;
                 border-right: 0;
                 border-bottom: 1px solid var(--line);
             }
 
             .shot {
-                height: 200px;
-                margin: 32px -16px 0 0;
+                display: block;
+                flex: none;
+                min-height: 0;
+                margin-top: 32px;
+                container-type: normal;
+            }
+
+            .frame {
+                width: 100%;
             }
 
             h1 {
@@ -393,10 +455,12 @@
             </svg>
 
             <figure class="shot">
-                <picture>
-                    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/stratusadv/scribe/main/assets/home-dark.png">
-                    <img src="https://raw.githubusercontent.com/stratusadv/scribe/main/assets/home-light.png" alt="The Home screen, with recordings shown as tiles">
-                </picture>
+                <div class="frame">
+                    <picture>
+                        <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/stratusadv/scribe/main/assets/home-dark.png">
+                        <img src="https://raw.githubusercontent.com/stratusadv/scribe/main/assets/home-light.png" alt="The Home screen, with recordings shown as tiles" width="2880" height="2010">
+                    </picture>
+                </div>
             </figure>
 
             <h1>Record the meeting.<br>Read the notes.</h1>
@@ -444,6 +508,8 @@
         };
 
         const tints = ['var(--blue)', 'var(--cyan)', 'var(--magenta)'];
+        const frame = document.querySelector('.frame');
+        const motion = matchMedia('(prefers-reduced-motion: reduce)');
 
         const arrow = '<svg class="arrow" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3v11M5 9l5 5 5-5M4 17h12"/></svg>';
 
@@ -462,6 +528,20 @@
                 bar.style.setProperty('--tint', tints[Math.floor(index / 9) % tints.length]);
                 wave.append(bar);
             }
+        };
+
+        const tilt = (event) => {
+            if (event.pointerType !== 'mouse' || motion.matches) return;
+
+            const box = frame.getBoundingClientRect();
+            const x = (event.clientX - box.left) / box.width;
+            const y = (event.clientY - box.top) / box.height;
+            const clamp = (value) => Math.max(-1, Math.min(1, value));
+
+            frame.style.setProperty('--rx', `${(clamp(0.5 - y) * 10).toFixed(2)}deg`);
+            frame.style.setProperty('--ry', `${(clamp(x - 0.5) * 18).toFixed(2)}deg`);
+            frame.style.setProperty('--gx', `${(x * 100).toFixed(1)}%`);
+            frame.style.setProperty('--gy', `${(y * 100).toFixed(1)}%`);
         };
 
         const megabytes = (bytes) => `${(bytes / 1048576).toFixed(0)} MB`;
@@ -507,6 +587,7 @@
         });
 
         const fonts = stylesheet.then(() => document.fonts.ready);
+        const shot = frame.querySelector('img').decode().catch(() => {});
 
         const release = fetch('https://api.github.com/repos/stratusadv/scribe/releases/latest')
             .then((response) => response.ok ? response.json() : Promise.reject(response.status))
@@ -517,8 +598,9 @@
             });
 
         drawWave();
+        document.querySelector('.brand').addEventListener('pointermove', tilt);
 
-        Promise.all([fonts, release]).then(reveal);
+        Promise.all([fonts, release, shot]).then(reveal);
         setTimeout(reveal, 2500);
     </script>
 </body>
