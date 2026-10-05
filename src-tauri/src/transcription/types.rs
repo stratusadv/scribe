@@ -12,6 +12,8 @@ pub(crate) struct TranscriptSegment {
     pub(crate) text: String,
     pub(crate) start_seconds: f64,
     pub(crate) end_seconds: f64,
+    #[serde(default)]
+    pub(crate) speaker: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +28,7 @@ pub(crate) struct SegmentChunk {
     pub(crate) text: String,
     pub(crate) start_seconds: f64,
     pub(crate) end_seconds: f64,
+    pub(crate) speaker: Option<u16>,
 }
 
 #[derive(Debug, Clone, Serialize)]

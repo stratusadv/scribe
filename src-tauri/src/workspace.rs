@@ -55,6 +55,14 @@ pub(crate) struct JobMeta {
     pub(crate) tags: Vec<String>,
     #[serde(default)]
     pub(crate) favourite: bool,
+    #[serde(default)]
+    pub(crate) speaker_links: Vec<SpeakerLink>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SpeakerLink {
+    pub(crate) speaker: u16,
+    pub(crate) person_id: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +90,8 @@ pub(crate) struct JobMetaPatch {
     pub(crate) tags: Option<Vec<String>>,
     #[serde(default)]
     pub(crate) favourite: Option<bool>,
+    #[serde(default)]
+    pub(crate) speaker_links: Option<Vec<SpeakerLink>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -89,6 +99,30 @@ pub(crate) struct JobSearchHit {
     pub(crate) job_id: String,
     pub(crate) source: String,
     pub(crate) snippet: String,
+}
+
+fn speaker_links_clean(links: Vec<SpeakerLink>) -> Vec<SpeakerLink> {
+    let mut cleaned: Vec<SpeakerLink> = Vec::with_capacity(links.len());
+
+    for link in links {
+        let person_id = link.person_id.trim();
+
+        if person_id.is_empty() {
+            continue;
+        }
+
+        if cleaned.iter().any(|kept| kept.speaker == link.speaker) {
+            continue;
+        }
+
+        cleaned.push(SpeakerLink { speaker: link.speaker, person_id: person_id.to_owned() });
+    }
+
+    cleaned.sort_by_key(|link| link.speaker);
+
+    debug_assert!(cleaned.is_sorted_by_key(|link| link.speaker));
+
+    cleaned
 }
 
 pub(crate) fn meta_apply_patch(id: &str, patch: JobMetaPatch) -> AppResult<JobMeta> {
@@ -128,6 +162,10 @@ pub(crate) fn meta_apply_patch(id: &str, patch: JobMetaPatch) -> AppResult<JobMe
 
     if let Some(favourite) = patch.favourite {
         meta.favourite = favourite;
+    }
+
+    if let Some(speaker_links) = patch.speaker_links {
+        meta.speaker_links = speaker_links_clean(speaker_links);
     }
 
     debug_assert_eq!(meta.id, id);
@@ -992,6 +1030,7 @@ pub(crate) mod test_support {
             project: None,
             tags: Vec::new(),
             favourite: false,
+            speaker_links: Vec::new(),
         }
     }
 }
@@ -1009,6 +1048,7 @@ mod tests {
                 text: text.to_owned(),
                 start_seconds: 0.0,
                 end_seconds: 1.0,
+                speaker: None,
             }],
         }
     }

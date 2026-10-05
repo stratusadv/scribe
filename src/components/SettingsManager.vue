@@ -211,6 +211,10 @@ function notes_thinking_change(event: Event) {
     void update({ notes_thinking: thinking_choice_is(value) ? value : null })
 }
 
+function speakers_change(event: Event) {
+    void update({ speakers: select_value(event) === 'on' })
+}
+
 function notes_template_default_change(event: Event) {
     const value = select_value(event)
 
@@ -415,6 +419,21 @@ async function api_key_remove(purpose: APIEndpointPurpose) {
                         </option>
                     </select>
                 </div>
+            </div>
+
+            <div>
+                <h3 class="mb-3 flex items-center">
+                    Speakers
+                    <InfoHint text="Tells apart who is talking and labels each line. It runs on this computer before the upload and takes a minute or two per hour of audio." />
+                </h3>
+                <select
+                    :value="settings.speakers === false ? 'off' : 'on'"
+                    class="input"
+                    @change="speakers_change"
+                >
+                    <option value="on">Label speakers</option>
+                    <option value="off">Off</option>
+                </select>
             </div>
 
             <div>

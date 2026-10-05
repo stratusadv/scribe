@@ -15,6 +15,7 @@ const SETTINGS_EMPTY: Settings = {
     notes_thinking: null,
     api_host: null,
     jobs_view: null,
+    speakers: null,
 }
 
 const settings_state = use_settings()
@@ -59,6 +60,7 @@ describe('update', () => {
             theme: 'dark',
             palette: 'nord',
             jobs_view: 'grid',
+            speakers: null,
         })
 
         expect(settings_state.settings.value.palette).toBe('nord')

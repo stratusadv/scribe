@@ -129,8 +129,8 @@ test('the default template select feeds the Templates page', async ({ page }) =>
     await nav_to(page, 'Home')
     await page.locator('.recording-tile').filter({ hasText: 'discovery-call.wav' }).click()
 
-    await expect(page.getByLabel('Template').locator('option:checked'))
-        .toHaveText('Choose a template')
+    await expect(page.getByLabel('Template')).toHaveValue('')
+    await expect(page.getByLabel('Template')).toHaveAttribute('placeholder', 'Choose a template')
     await expect(page.getByRole('button', { name: 'Next' })).toBeDisabled()
 })
 
