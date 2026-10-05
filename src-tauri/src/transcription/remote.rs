@@ -135,7 +135,7 @@ struct ChunkTimeline {
 impl ChunkTimeline {
     fn seconds_at(&self, chars_before: u32, chars_total: u32) -> f64 {
         debug_assert!(chars_before <= chars_total);
-        debug_assert!(!self.voiced_counts.is_empty());
+        debug_assert_ne!(self.voiced_counts.len(), 0);
 
         let voiced_total = self.voiced_counts.last().copied().unwrap_or(0);
 
@@ -180,7 +180,7 @@ pub(super) async fn transcribe_audio_file(
     let chunk_seconds = endpoint.transcribe_chunk_seconds.filter(|seconds| *seconds > 0);
 
     debug_assert!(url.starts_with("http"));
-    debug_assert!(!endpoint.model_resolved().is_empty());
+    debug_assert_ne!(endpoint.model_resolved(), "");
 
     let verbose_wanted = endpoint
         .transcribe_verbose
@@ -238,7 +238,7 @@ fn transcribe_audio_file_emit(
     parsed_text: &str,
     segments: &[TranscriptSegment],
 ) {
-    debug_assert!(!progress.stream_id.is_empty());
+    debug_assert_ne!(progress.stream_id, "");
 
     if segments.is_empty() {
         let text_trimmed = parsed_text.trim();
@@ -391,7 +391,7 @@ impl<'timelines> ChunkCollection<'timelines> {
 
         transcribe_chunked_complete(&self.completed, self.chunk_count as usize)?;
 
-        debug_assert!(self.pending.is_empty());
+        debug_assert_eq!(self.pending.len(), 0);
 
         Ok(self.completed)
     }
@@ -893,7 +893,7 @@ fn progress_emit_segment(
     start_seconds: f64,
     end_seconds: f64,
 ) {
-    debug_assert!(!progress.stream_id.is_empty());
+    debug_assert_ne!(progress.stream_id, "");
     debug_assert!(start_seconds <= end_seconds || end_seconds == 0.0);
 
     let chunk = SegmentChunk {
@@ -917,8 +917,8 @@ async fn upload_chunk(
     bytes: &[u8],
     file_name: &str,
 ) -> AppResult<APIResponse> {
-    debug_assert!(!file_name.is_empty());
-    debug_assert!(!upload.model.is_empty());
+    debug_assert_ne!(file_name, "");
+    debug_assert_ne!(upload.model, "");
 
     if bytes.is_empty() {
         return Err(AppError::Audio("the prepared audio holds no samples".into()));
@@ -959,7 +959,7 @@ async fn upload_chunk(
 
 fn samples_to_wav_bytes(samples: &[f32], sample_rate: u32) -> AppResult<Vec<u8>> {
     debug_assert!(sample_rate > 0);
-    debug_assert!(!samples.is_empty());
+    debug_assert_ne!(samples.len(), 0);
 
     let samples_bytes = samples.len() * PCM16_SAMPLE_BYTES as usize;
     let capacity = samples_bytes + WAV_HEADER_BYTES_ESTIMATE as usize;
@@ -1078,8 +1078,8 @@ mod tests {
     fn an_empty_set_of_chunks_assembles_into_an_empty_transcript() {
         let transcript = transcribe_chunked_assemble(Vec::new(), &[]);
 
-        assert!(transcript.text.is_empty());
-        assert!(transcript.segments.is_empty());
+        assert_eq!(transcript.text, "");
+        assert_eq!(transcript.segments.len(), 0);
         assert!((timelines_even(4, 30)[3].offset_seconds - 90.0).abs() < 1e-9);
         assert!(timelines_even(4, 30)[0].offset_seconds.abs() < f64::EPSILON);
     }
@@ -1092,7 +1092,7 @@ mod tests {
         let timelines = timelines_even(3, 30);
 
         assert_eq!(pending.len(), 2);
-        assert!(transcribe_chunked_pending(&[]).is_empty());
+        assert_eq!(transcribe_chunked_pending(&[]).len(), 0);
 
         transcribe_chunked_drain(&mut pending, &mut completed, &mut next, None, &timelines);
 
@@ -1106,7 +1106,7 @@ mod tests {
         let order: Vec<u32> = completed.iter().map(|(index, _)| *index).collect();
 
         assert_eq!(next, 3);
-        assert!(pending.is_empty());
+        assert_eq!(pending.len(), 0);
         assert!(transcribe_chunked_complete(&completed, 3).is_ok());
         assert_eq!(order, vec![0, 1, 2]);
         assert!(transcribe_chunked_complete(&[], 0).is_ok());
@@ -1128,7 +1128,7 @@ mod tests {
         let (payloads, silent) = payloads_build(&loud, sample_rate, 2).expect("build");
 
         assert_eq!(payloads.len(), 2);
-        assert!(silent.is_empty());
+        assert_eq!(silent.len(), 0);
         assert_eq!(payloads[0].name, "chunk_0000.wav");
         assert_eq!(payloads[1].name, "chunk_0001.wav");
         assert_eq!(payloads[1].index, 1);
@@ -1138,9 +1138,9 @@ mod tests {
         let quiet = vec![0.001_f32; sample_rate as usize * 3];
         let (none, all) = payloads_build(&quiet, sample_rate, 2).expect("build");
 
-        assert!(none.is_empty());
+        assert_eq!(none.len(), 0);
         assert_eq!(all, vec![0, 1]);
-        assert!(payloads_build(&[], sample_rate, 2).unwrap().0.is_empty());
+        assert_eq!(payloads_build(&[], sample_rate, 2).unwrap().0.len(), 0);
     }
 
     #[test]
@@ -1194,7 +1194,7 @@ mod tests {
         assert!((segments[0].end_seconds - 108.0).abs() < 1e-9);
         assert!((segments[1].start_seconds - 108.0).abs() < 1e-9);
         assert!((segments[2].end_seconds - 124.0).abs() < 1e-9);
-        assert!(segments_from_text("   ", timeline).is_empty());
+        assert_eq!(segments_from_text("   ", timeline).len(), 0);
         assert_eq!(segments_from_text("no terminator here", timeline).len(), 1);
         assert_eq!(segments_from_text("It is 10.30 now. Ok.", timeline).len(), 2);
     }

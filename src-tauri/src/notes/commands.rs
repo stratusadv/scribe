@@ -459,7 +459,7 @@ fn code_fence_strip(reply: &str) -> &str {
 }
 
 fn instruction_length_validate(text: &str, label: &str) -> AppResult<()> {
-    debug_assert!(!label.is_empty());
+    debug_assert_ne!(label, "");
 
     if text.chars().count() > INSTRUCTION_CHARS_MAX as usize {
         return Err(AppError::Config(format!(
@@ -667,7 +667,7 @@ mod tests {
         assert_eq!(corrections[0].text, "time is 10:30");
         assert_eq!(corrections[1].index, 3);
         assert_eq!(corrections[1].text, "last line");
-        assert!(corrections_parse("1: anything", 0).is_empty());
+        assert_eq!(corrections_parse("1: anything", 0).len(), 0);
         assert_eq!(corrections_parse("1: é", 1)[0].text, "é");
     }
 
@@ -738,8 +738,8 @@ mod tests {
 
         assert!(meta_resolve(None).unwrap().is_none());
         assert!(meta_resolve(Some(&meta.id)).unwrap().is_none());
-        assert!(people_resolve(None).unwrap().is_empty());
-        assert!(people_resolve(Some(&meta)).unwrap().is_empty());
+        assert_eq!(people_resolve(None).unwrap().len(), 0);
+        assert_eq!(people_resolve(Some(&meta)).unwrap().len(), 0);
 
         workspace::meta_save(&meta).unwrap();
         person_upsert(&person_with("p", "Pat", "", "")).unwrap();
@@ -771,7 +771,7 @@ mod tests {
         assert_eq!(corrections[0].text, "first, corrected twice");
         assert_eq!(corrections[1].index, 1);
         assert_eq!(corrections[1].text, "Dana said Kalymma, not Kalima.");
-        assert!(corrections_parse("", 4).is_empty());
+        assert_eq!(corrections_parse("", 4).len(), 0);
     }
 
     #[test]

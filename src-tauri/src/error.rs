@@ -60,7 +60,7 @@ pub(crate) fn error_chain_describe(error: &dyn std::error::Error) -> String {
     }
 
     debug_assert!(depth <= ERROR_SOURCE_DEPTH_MAX);
-    debug_assert!(!described.is_empty());
+    debug_assert_ne!(described, "");
 
     described
 }

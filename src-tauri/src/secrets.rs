@@ -102,7 +102,7 @@ mod dpapi {
 }
 
 pub(crate) fn protected_write(path: &Path, plaintext: &str) -> AppResult<()> {
-    debug_assert!(!plaintext.is_empty());
+    debug_assert_ne!(plaintext, "");
     debug_assert!(path.is_absolute());
 
     if let Some(parent) = path.parent() {

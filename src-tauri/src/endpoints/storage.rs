@@ -136,8 +136,8 @@ fn host_validate(host: &str) -> AppResult<()> {
 }
 
 fn builtin(id: &str, name: &str, purpose: APIEndpointPurpose, model: &str) -> APIEndpoint {
-    debug_assert!(!id.is_empty());
-    debug_assert!(!model.is_empty());
+    debug_assert_ne!(id, "");
+    debug_assert_ne!(model, "");
 
     let transcribe = purpose == APIEndpointPurpose::Transcription;
 
@@ -213,7 +213,7 @@ pub(crate) fn endpoint_load(id: &str) -> AppResult<APIEndpoint> {
     }
 
     debug_assert_eq!(endpoint.id, id);
-    debug_assert!(!endpoint.host.is_empty());
+    debug_assert_ne!(endpoint.host, "");
 
     Ok(endpoint)
 }
@@ -306,8 +306,8 @@ mod tests {
     #[test]
     fn every_builtin_endpoint_starts_without_a_key_or_a_host() {
         for endpoint in builtins() {
-            assert!(endpoint.host.is_empty());
-            assert!(endpoint.api_key.is_empty());
+            assert_eq!(endpoint.host, "");
+            assert_eq!(endpoint.api_key, "");
             assert!(!endpoint.has_api_key);
         }
     }
@@ -347,7 +347,7 @@ mod tests {
 
         api_key_set(APIEndpointPurpose::Notes, "   ").unwrap();
 
-        assert!(keys_load().unwrap().is_empty());
+        assert_eq!(keys_load().unwrap().len(), 0);
         assert!(!path.exists());
         assert!(!service_status_load().unwrap().notes.user);
     }
@@ -371,7 +371,7 @@ mod tests {
 
         std::fs::write(&path, b"{ not json").unwrap();
 
-        assert!(keys_load().unwrap().is_empty());
+        assert_eq!(keys_load().unwrap().len(), 0);
 
         api_key_set(APIEndpointPurpose::Notes, "fresh").unwrap();
 
@@ -479,9 +479,9 @@ mod tests {
 
         assert_eq!(endpoints.len(), 2);
         assert!(notes.has_api_key);
-        assert!(notes.api_key.is_empty());
+        assert_eq!(notes.api_key, "");
         assert_eq!(notes.host, "https://h.test");
         assert_eq!(transcription.has_api_key, api_key_builtin(ENDPOINT_ID_TRANSCRIPTION).is_some());
-        assert!(transcription.api_key.is_empty());
+        assert_eq!(transcription.api_key, "");
     }
 }
